@@ -1,33 +1,50 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&display=swap');
 
 :root {
-  /* Colors */
-  --bg-deep: #09090e;
-  --bg-panel: #11111a;
-  --bg-card: #161625;
-  --bg-input: #1a1a2b;
+  /* Colors - Obsidian Space & Crimson Gold */
+  --bg-deep: #05050A;
+  --bg-panel: #0A0A12;
+  --bg-card: #12121D;
+  --bg-input: #181824;
   
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  --text-primary: #fdfdfd;
+  --text-secondary: #a1a1aa;
+  --text-muted: #52525b;
   
-  --accent-cyan: #06b6d4;
-  --accent-purple: #a855f7;
-  --accent-purple-glow: rgba(168, 85, 247, 0.4);
-  --accent-cyan-glow: rgba(6, 182, 212, 0.4);
+  --accent-cyan: #f43f5e; /* Rose */
+  --accent-purple: #f59e0b; /* Gold/Amber */
+  --accent-purple-glow: rgba(245, 158, 11, 0.4);
+  --accent-cyan-glow: rgba(244, 63, 94, 0.4);
   
-  --border-light: rgba(255, 255, 255, 0.08);
-  --border-accent: rgba(168, 85, 247, 0.3);
+  --border-light: rgba(255, 255, 255, 0.04);
+  --border-accent: rgba(244, 63, 94, 0.3);
   
   --success: #10b981;
-  --error: #f43f5e;
+  --error: #ef4444;
   
   /* Fonts */
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', monospace;
   
   /* Layout */
   --sidebar-width: 320px;
+}
+
+[data-theme="light"] {
+  /* Light theme overrides */
+  --bg-deep: #ffffff;
+  --bg-panel: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-input: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --accent-cyan: #e11d48;
+  --accent-purple: #d97706;
+  --border-light: rgba(0,0,0,0.06);
+  --border-accent: rgba(225, 29, 72, 0.3);
+  --success: #059669;
+  --error: #dc2626;
 }
 
 * {
@@ -48,8 +65,8 @@ body {
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -58,7 +75,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-light);
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -68,10 +85,10 @@ body {
 /* Animations */
 @keyframes pulseGlow {
   0%, 100% {
-    box-shadow: 0 0 15px var(--accent-purple-glow);
+    box-shadow: 0 0 20px var(--accent-purple-glow);
   }
   50% {
-    box-shadow: 0 0 25px rgba(168, 85, 247, 0.7);
+    box-shadow: 0 0 35px rgba(245, 158, 11, 0.7);
   }
 }
 
@@ -80,24 +97,41 @@ body {
     box-shadow: 0 0 15px var(--accent-cyan-glow);
   }
   50% {
-    box-shadow: 0 0 25px rgba(6, 182, 212, 0.7);
+    box-shadow: 0 0 25px rgba(244, 63, 94, 0.7);
   }
 }
 
 @keyframes slideInUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(20px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes smoothScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes sweepGlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 @keyframes rotate {
@@ -107,20 +141,23 @@ body {
 
 /* Utilities */
 .glassmorphism {
-  background: rgba(22, 22, 37, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(18, 18, 29, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--border-light);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
 .text-gradient {
   background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+  background-size: 200% 200%;
+  animation: sweepGlow 4s ease infinite;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .text-gradient-purple {
-  background: linear-gradient(135deg, #c084fc, var(--accent-purple));
+  background: linear-gradient(135deg, #fbbf24, var(--accent-purple));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }

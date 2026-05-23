@@ -42,23 +42,27 @@
 
 .new-project-btn {
   margin: 16px;
-  padding: 12px;
+  padding: 14px 16px;
   background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
   color: white;
   border: none;
-  border-radius: 8px;
-  font-weight: 600;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  transition: transform 0.2s, box-shadow 0.2s;
+  gap: 10px;
+  transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
+  box-shadow: 0 4px 15px rgba(244, 63, 94, 0.2);
 }
 
 .new-project-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.4);
+  filter: brightness(1.1);
 }
 
 .projects-list {
@@ -311,6 +315,14 @@
   background: rgba(9, 9, 14, 0.4);
 }
 
+.glassmorphism {
+  background: rgba(22, 22, 37, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+}
+
 .prompt-card {
   padding: 20px;
   border-bottom: 1px solid var(--border-light);
@@ -354,23 +366,25 @@
 }
 
 .generate-btn {
-  padding: 10px 20px;
-  background: linear-gradient(135deg, var(--accent-purple), #ec4899);
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
   color: white;
   border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 13px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 14px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
+  box-shadow: 0 4px 15px rgba(244, 63, 94, 0.2);
 }
 
 .generate-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 15px rgba(168, 85, 247, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.4);
+  filter: brightness(1.1);
 }
 
 .generate-btn:disabled {
@@ -1035,7 +1049,7 @@ input:checked + .slider:before {
   width: 480px;
   border-radius: 16px;
   padding: 32px;
-  animation: slideInUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: smoothScaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   text-align: left;
 }
 
