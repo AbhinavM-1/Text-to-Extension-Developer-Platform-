@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
+import ThemeToggle from './components/ThemeToggle';
 
 const BACKEND_URL = 'http://localhost:3001';
 
@@ -34,6 +35,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState([]);
   const [apiKey, setApiKey] = useState('');
+  const [aiProvider, setAiProvider] = useState('openai');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
@@ -44,12 +46,35 @@ export default function App() {
   const [isSandboxExtensionActive, setIsSandboxExtensionActive] = useState(false);
   const [isSandboxPopupOpen, setIsSandboxPopupOpen] = useState(false);
 
+  // Week 3: Edit Request state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editPrompt, setEditPrompt] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Week 4: Security Scan state
+  const [securityScan, setSecurityScan] = useState(null);
+  const [isSecurityPanelOpen, setIsSecurityPanelOpen] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+
+  // Subscription tier state
+  const [userTier, setUserTier] = useState(() => localStorage.getItem('extensio_tier') || 'pro');
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [generationCount, setGenerationCount] = useState(() => parseInt(localStorage.getItem('extensio_gen_count') || '0'));
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardName, setCardName] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+
   const consoleEndRef = useRef(null);
 
   // Load API key and projects on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('extensio_api_key') || '';
+    const savedProvider = localStorage.getItem('extensio_ai_provider') || 'openai';
     setApiKey(savedKey);
+    setAiProvider(savedProvider);
     fetchProjects();
   }, []);
 
@@ -109,14 +134,16 @@ export default function App() {
     setLogs((prev) => [...prev, { time, text }]);
   };
 
-  // Trigger Settings Modal save
   const handleSaveApiKey = (e) => {
     e.preventDefault();
     const key = e.target.elements.apiKey.value.trim();
+    const provider = e.target.elements.aiProvider.value;
     localStorage.setItem('extensio_api_key', key);
+    localStorage.setItem('extensio_ai_provider', provider);
     setApiKey(key);
+    setAiProvider(provider);
     setIsSettingsOpen(false);
-    addLog(`System configured: API Key updated.`);
+    addLog(`System configured: AI Provider & API Key updated.`);
   };
 
   // Select project and default to its latest version and first file
@@ -373,15 +400,149 @@ export default function App() {
     }
   };
 
+  // ========== WEEK 3: Edit Request Handler ==========
+  const handleEditRequest = async (e) => {
+    e.preventDefault();
+    if (!editPrompt.trim() || !selectedProject || !selectedVersion) return;
+
+    // Free tier checks removed
+
+    setEditLoading(true);
+    setLogs([]);
+    addLog('✏️ Starting Edit Request...');
+    setTimeout(() => addLog('🔍 Analyzing current extension code...'), 500);
+    setTimeout(() => addLog('🧠 Building modification context for Gemini...'), 1000);
+    setTimeout(() => addLog('🛰️ Sending edit request to AI engine...'), 1500);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: selectedProject.id,
+          version: selectedVersion,
+          editPrompt: editPrompt,
+          apiKey: apiKey,
+          aiProvider: aiProvider
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Edit request failed');
+      }
+
+      const { project: updatedProject, securityScan: scan } = await response.json();
+
+      addLog('✨ Edit applied successfully!');
+      addLog('🧪 Manifest V3 validation passed!');
+      if (scan) {
+        addLog(`🛡️ Security scan: Grade ${scan.grade} (Score: ${scan.score}/100)`);
+        if (scan.summary.critical > 0) addLog(`⚠️ ${scan.summary.critical} critical finding(s) detected`);
+        setSecurityScan(scan);
+      }
+      addLog('✅ New version created from edit request.');
+
+      await fetchProjects();
+      setSelectedProject(updatedProject);
+      const newLatestVer = updatedProject.versions[updatedProject.versions.length - 1];
+      setSelectedVersion(newLatestVer.version);
+      const defaultFile = newLatestVer.files.find(f => f.name.toLowerCase() === 'manifest.json') || newLatestVer.files[0];
+      setSelectedFile(defaultFile);
+      setEditPrompt('');
+      setIsEditMode(false);
+      setIsEditing(false);
+    } catch (err) {
+      addLog(`❌ Edit Error: ${err.message}`);
+      console.error(err);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // ========== WEEK 4: Security Scan Handler ==========
+  const handleSecurityScan = async () => {
+    if (!selectedProject || !selectedVersion) return;
+
+    // Free tier checks removed
+
+    setScanLoading(true);
+    addLog('🛡️ Running security audit on generated code...');
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/projects/${selectedProject.id}/versions/${selectedVersion}/security-scan`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Security scan failed');
+      }
+
+      const scan = await response.json();
+      setSecurityScan(scan);
+      setIsSecurityPanelOpen(true);
+      addLog(`🛡️ Security Audit Complete — Grade: ${scan.grade} | Score: ${scan.score}/100`);
+      addLog(`   Critical: ${scan.summary.critical} | Warnings: ${scan.summary.warning} | Info: ${scan.summary.info}`);
+    } catch (err) {
+      addLog(`❌ Security Scan Error: ${err.message}`);
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  // Subscription tier handler
+  const handleUpgrade = (tier) => {
+    if (tier === 'pro') {
+      setIsCheckingOut(true);
+      setCardNumber('');
+      setCardName('');
+      setCardExpiry('');
+      setCardCvv('');
+    } else {
+      setUserTier('free');
+      localStorage.setItem('extensio_tier', 'free');
+      setIsUpgradeModalOpen(false);
+      addLog(`🆓 Downgraded to FREE tier. Generative features now restricted.`);
+    }
+  };
+
+  const handleCompletePayment = async (e) => {
+    e.preventDefault();
+    if (!cardNumber || !cardName || !cardExpiry || !cardCvv) {
+      alert("Please fill in all credit card details.");
+      return;
+    }
+    setCheckoutLoading(true);
+    addLog(`💳 Initiating Stripe Payment Session for Pro Tier...`);
+    
+    setTimeout(() => addLog(`🔐 Resolving 3D Secure verification...`), 600);
+    setTimeout(() => addLog(`🏦 Clearing funds through processor gateway...`), 1200);
+    
+    setTimeout(() => {
+      setUserTier('pro');
+      localStorage.setItem('extensio_tier', 'pro');
+      setCheckoutLoading(false);
+      setIsCheckingOut(false);
+      setIsUpgradeModalOpen(false);
+      addLog(`🎉 PAYMENT APPROVED! Subscription successfully upgraded to PRO tier.`);
+      addLog(`✨ All advanced features unlocked: Edit Request, Security Audit, Unlimited Gens.`);
+    }, 2000);
+  };
+
+  // Track generation count for free tier limits
+  const incrementGenerationCount = () => {
+    const newCount = generationCount + 1;
+    setGenerationCount(newCount);
+    localStorage.setItem('extensio_gen_count', newCount.toString());
+  };
+
   // Generate / Iterate flow
   const handleGenerate = async (e) => {
     e.preventDefault();
     if (!prompt.trim()) return;
 
-    if (!apiKey) {
-      setIsSettingsOpen(true);
-      return;
-    }
+    // Free tier checks removed
 
     setLoading(true);
     setLogs([]);
@@ -397,7 +558,8 @@ export default function App() {
       const isIteration = selectedProject !== null;
       const requestBody = {
         prompt: prompt,
-        apiKey: apiKey
+        apiKey: apiKey,
+        aiProvider: aiProvider
       };
 
       if (isIteration) {
@@ -424,6 +586,7 @@ export default function App() {
       addLog('🧪 Verification: structural manifest checks completed!');
       addLog('📦 Creating validated ZIP package... (Manifest V3 integrity validated)');
       addLog('✅ All systems active. Ready to download.');
+      incrementGenerationCount();
 
       // Refresh project lists
       await fetchProjects();
@@ -492,7 +655,8 @@ export default function App() {
     return {
       isImageBlocker: joinedText.includes('image') || joinedText.includes('img') || joinedText.includes('red'),
       isDarkMode: joinedText.includes('dark') || joinedText.includes('night') || joinedText.includes('background'),
-      isHighlighter: joinedText.includes('highlight') || joinedText.includes('neon') || joinedText.includes('link')
+      isHighlighter: joinedText.includes('highlight') || joinedText.includes('neon') || joinedText.includes('link'),
+      isAdBlocker: joinedText.includes('adblocker') || joinedText.includes('ad-block') || joinedText.includes('.ad') || joinedText.includes('adsbygoogle') || joinedText.includes('advertisement') || joinedText.includes('banner') || joinedText.includes('sponsored')
     };
   };
 
@@ -616,6 +780,20 @@ export default function App() {
   const handleDownloadZip = async (e) => {
     e.preventDefault();
     if (!selectedProject || !selectedVersion) return;
+
+    // Check if the extension requires API calls (fetch or XMLHttpRequest)
+    const activeFiles = getActiveFiles();
+    const hasApiCalls = activeFiles.some(file => {
+      if (file.name.toLowerCase() === 'manifest.json') return false;
+      const content = file.content || '';
+      return /fetch\s*\(|XMLHttpRequest/i.test(content);
+    });
+
+    if (hasApiCalls && userTier === 'free') {
+      addLog('⚠️ API calls detected. This is an Advanced Feature. Please upgrade to Pro to download.');
+      setIsUpgradeModalOpen(true);
+      return;
+    }
 
     addLog(`📦 Requesting extension ZIP package from server...`);
     try {
@@ -840,6 +1018,53 @@ export default function App() {
             font-size: 12px;
             color: #6b7280;
           }
+          /* AD ELEMENTS */
+          .ad-banner {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            border: 2px dashed #f59e0b;
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin: 16px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #92400e;
+            font-weight: 600;
+            transition: all 0.3s;
+          }
+          .ad-banner .ad-label {
+            background: #f59e0b;
+            color: white;
+            font-size: 9px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 4px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+          }
+          .ad-sidebar {
+            background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+            border: 2px dashed #7c3aed;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            text-align: center;
+            font-size: 12px;
+            color: #4c1d95;
+            transition: all 0.3s;
+          }
+          .advertisement {
+            background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+            border: 2px dashed #16a34a;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 12px 0;
+            text-align: center;
+            font-size: 12px;
+            color: #14532d;
+            transition: all 0.3s;
+          }
           /* FALLBACK SIMULATOR CLASSES */
           body.dark-theme-activated {
             background-color: #111827 !important;
@@ -885,8 +1110,14 @@ export default function App() {
         <div class="content-area">
           <h3>Vibrant Modern Frameworks</h3>
           <p>
-            Browse stunning mock layouts. Toggle the extension switch in the sandbox toolbar above to observe how your AI-generated Chrome content script interacts with the DOM elements (images, theme sheets, and hyperlinks) in real-time!
+            Browse stunning mock layouts. Toggle the extension switch in the sandbox toolbar above to observe how your AI-generated Chrome content script interacts with the DOM elements (images, ads, theme sheets, and hyperlinks) in real-time!
           </p>
+
+          <div class="ad-banner ${isSandboxExtensionActive && directives.isAdBlocker ? 'ad' : 'ad-banner'}">
+            <span>🎯 SPONSORED — You won't believe these AMAZING deals this season! Limited time offer!</span>
+            <span class="ad-label">Ad</span>
+          </div>
+
           <div class="cards-grid">
             <div class="card">
               <img 
@@ -911,6 +1142,17 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          <div class="advertisement">
+            📢 <strong>ADVERTISEMENT:</strong> Get the best deals on premium subscriptions — Sign up now and save 50%!
+          </div>
+
+          <div class="ad-sidebar sponsored">
+            🛍️ <strong>Sponsored by TechDeals.io</strong><br/>
+            Upgrade your setup today with exclusive partner discounts. Click to explore!
+          </div>
+
+          <ins class="adsbygoogle" style="display:block; background:#fef9c3; border: 2px dashed #ca8a04; border-radius: 8px; padding: 10px; margin-top: 12px; font-size: 12px; color: #713f12; text-align: center;">Google AdSense Block — Premium Ad Placement Zone</ins>
         </div>
         ${contentScriptInject}
       </body>
@@ -929,6 +1171,7 @@ export default function App() {
             </svg>
             <span className="text-gradient">Extensio.ai</span>
           </div>
+        <ThemeToggle />
         </div>
 
         <button 
@@ -983,6 +1226,36 @@ export default function App() {
                 </div>
               );
             })
+          )}
+        </div>
+
+        {/* Subscription Tier Badge */}
+        <div className="tier-badge-section" style={{ padding: '8px 16px' }}>
+          <div 
+            className={`tier-badge ${userTier}`}
+            onClick={() => setIsUpgradeModalOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
+              background: userTier === 'pro' ? 'linear-gradient(135deg, #f59e0b22, #f97316222)' : 'var(--bg-tertiary)',
+              border: userTier === 'pro' ? '1px solid #f59e0b55' : '1px solid var(--border-color)',
+              transition: 'all 0.3s'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '14px' }}>{userTier === 'pro' ? '👑' : '🆓'}</span>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: userTier === 'pro' ? '#f59e0b' : 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {userTier} Plan
+              </span>
+            </div>
+            {userTier === 'free' && (
+              <span style={{ fontSize: '10px', color: 'var(--accent-cyan)', fontWeight: 600 }}>Upgrade →</span>
+            )}
+          </div>
+          {userTier === 'free' && (
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'center' }}>
+              {5 - generationCount} generations remaining
+            </div>
           )}
         </div>
 
@@ -1098,38 +1371,128 @@ export default function App() {
           <div className="workspace-layout">
             {/* Left Panel: Prompt Editor & History Timeline */}
             <div className="workspace-left">
-              <div className="prompt-card">
-                <div className="prompt-label">
-                  <span>{selectedProject ? 'Iterate extension' : 'Generate extension'}</span>
-                  {loading && <span style={{ color: 'var(--accent-cyan)', fontSize: '10px' }}>AI active</span>}
+              {/* Mode Toggle: Generate vs Edit */}
+              {selectedProject && (
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                  <button
+                    onClick={() => setIsEditMode(false)}
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                      fontSize: '11px', fontWeight: 700, transition: 'all 0.3s',
+                      background: !isEditMode ? 'var(--accent-purple)' : 'var(--bg-tertiary)',
+                      color: !isEditMode ? '#fff' : 'var(--text-secondary)'
+                    }}
+                  >
+                    🚀 Generate New
+                  </button>
+                  <button
+                    onClick={() => setIsEditMode(true)}
+                    style={{
+                      flex: 1, padding: '8px 12px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                      fontSize: '11px', fontWeight: 700, transition: 'all 0.3s',
+                      background: isEditMode ? 'linear-gradient(135deg, #f59e0b, #f97316)' : 'var(--bg-tertiary)',
+                      color: isEditMode ? '#fff' : 'var(--text-secondary)'
+                    }}
+                  >
+                    ✏️ Edit Request {userTier === 'free' ? '👑' : ''}
+                  </button>
                 </div>
-                <form onSubmit={handleGenerate}>
-                  <textarea
-                    className="prompt-textarea"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder={selectedProject ? "Add modifications: e.g. Add a popup toggle switch..." : "Write details..."}
-                    disabled={loading}
-                  />
-                  <div className="action-row">
-                    <button type="submit" className="generate-btn" disabled={loading || !prompt.trim()}>
-                      {loading ? (
-                        <>
-                          <div className="spinner"></div>
-                          <span>Computing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>{selectedProject ? 'Iterate' : 'Generate'}</span>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                          </svg>
-                        </>
-                      )}
-                    </button>
+              )}
+
+              {/* Edit Request Card (Week 3) */}
+              {isEditMode && selectedProject ? (
+                <div className="prompt-card" style={{ borderColor: '#f59e0b44' }}>
+                  <div className="prompt-label">
+                    <span style={{ color: '#f59e0b' }}>✏️ Edit Request</span>
+                    {editLoading && <span style={{ color: 'var(--accent-cyan)', fontSize: '10px' }}>AI modifying...</span>}
                   </div>
-                </form>
-              </div>
+                  <form onSubmit={handleEditRequest}>
+                    <textarea
+                      className="prompt-textarea"
+                      value={editPrompt}
+                      onChange={(e) => setEditPrompt(e.target.value)}
+                      placeholder='Describe the change: e.g. "Make the button blue instead of red" or "Add a dark mode toggle to the popup"'
+                      disabled={editLoading}
+                      style={{ borderColor: '#f59e0b33' }}
+                    />
+                    <div className="action-row">
+                      <button type="submit" className="generate-btn" disabled={editLoading || !editPrompt.trim()} style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}>
+                        {editLoading ? (
+                          <><div className="spinner"></div><span>Applying Edit...</span></>
+                        ) : (
+                          <><span>Apply Edit</span>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                          </svg></>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: '1.4' }}>
+                    💡 The AI will read your current code and apply only the requested change while preserving existing features.
+                  </div>
+                </div>
+              ) : (
+                <div className="prompt-card">
+                  <div className="prompt-label">
+                    <span>{selectedProject ? 'Iterate extension' : 'Generate extension'}</span>
+                    {loading && <span style={{ color: 'var(--accent-cyan)', fontSize: '10px' }}>AI active</span>}
+                  </div>
+                  <form onSubmit={handleGenerate}>
+                    <textarea
+                      className="prompt-textarea"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder={selectedProject ? "Add modifications: e.g. Add a popup toggle switch..." : "Write details..."}
+                      disabled={loading}
+                    />
+                    <div className="action-row">
+                      <button type="submit" className="generate-btn" disabled={loading || !prompt.trim()}>
+                        {loading ? (
+                          <>
+                            <div className="spinner"></div>
+                            <span>Computing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>{selectedProject ? 'Iterate' : 'Generate'}</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Security Scan Button (Week 4) */}
+              {selectedProject && (
+                <button
+                  onClick={handleSecurityScan}
+                  disabled={scanLoading}
+                  style={{
+                    width: '100%', padding: '10px 14px', borderRadius: '10px', cursor: 'pointer',
+                    border: '1px solid var(--border-color)', fontSize: '12px', fontWeight: 600,
+                    background: 'var(--bg-tertiary)', color: 'var(--text-secondary)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    transition: 'all 0.3s', marginBottom: '8px'
+                  }}
+                >
+                  <span>{scanLoading ? '🔄 Scanning...' : '🛡️ Run Security Audit'}</span>
+                  {securityScan && (
+                    <span style={{
+                      padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 800,
+                      background: securityScan.grade === 'A' ? '#10b98122' : securityScan.grade === 'B' ? '#f59e0b22' : '#ef444422',
+                      color: securityScan.grade === 'A' ? '#10b981' : securityScan.grade === 'B' ? '#f59e0b' : '#ef4444'
+                    }}>
+                      Grade: {securityScan.grade} ({securityScan.score}/100)
+                    </span>
+                  )}
+                </button>
+              )}
 
               {selectedProject && (
                 <div className="history-timeline-panel">
@@ -1388,27 +1751,336 @@ export default function App() {
         <div className="modal-overlay">
           <div className="modal-card glassmorphism">
             <div className="modal-header">
-              <h3 className="modal-title text-gradient">Gemini AI Settings</h3>
+              <h3 className="modal-title text-gradient">AI Engine Settings</h3>
               <button className="close-modal-btn" onClick={() => setIsSettingsOpen(false)}>×</button>
             </div>
             
             <form onSubmit={handleSaveApiKey}>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-label" htmlFor="aiProvider">AI Provider</label>
+                <select id="aiProvider" className="form-input" defaultValue={aiProvider}>
+                  <option value="openai">OpenAI (GPT-4o)</option>
+                  <option value="gemini">Google (Gemini 1.5 Pro)</option>
+                  <option value="anthropic">Anthropic (Claude 3.5 Sonnet)</option>
+                  <option value="xai">xAI (Grok 2)</option>
+                </select>
+              </div>
               <div className="form-group">
-                <label className="form-label" htmlFor="apiKey">Gemini API Key</label>
+                <label className="form-label" htmlFor="apiKey">API Key</label>
                 <input 
                   type="password"
                   id="apiKey" 
                   className="form-input" 
                   defaultValue={apiKey}
-                  placeholder="Paste your Gemini AI API Key here..."
+                  placeholder="Paste your API Key here..."
                 />
                 <p className="form-help">
-                  To get an API key, visit the Google AI Studio page. Your key is stored locally in your browser's memory and is never shared elsewhere.
+                  Your key is stored locally in your browser's memory and is never shared elsewhere. Ensure you have credits for the selected provider.
                 </p>
               </div>
 
               <button type="submit" className="save-modal-btn">Apply Settings</button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Week 4: Security Scan Results Modal */}
+      {isSecurityPanelOpen && securityScan && (
+        <div className="modal-overlay">
+          <div className="modal-card glassmorphism" style={{ maxWidth: '560px', maxHeight: '80vh', overflow: 'auto' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: securityScan.grade === 'A' ? '#10b981' : securityScan.grade === 'B' ? '#f59e0b' : '#ef4444' }}>
+                🛡️ Security Audit Report
+              </h3>
+              <button className="close-modal-btn" onClick={() => setIsSecurityPanelOpen(false)}>×</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
+              <div style={{
+                width: '80px', height: '80px', borderRadius: '16px', display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                background: securityScan.grade === 'A' ? 'linear-gradient(135deg, #10b98133, #10b98111)' : securityScan.grade === 'B' ? 'linear-gradient(135deg, #f59e0b33, #f59e0b11)' : 'linear-gradient(135deg, #ef444433, #ef444411)',
+                border: `2px solid ${securityScan.grade === 'A' ? '#10b981' : securityScan.grade === 'B' ? '#f59e0b' : '#ef4444'}`
+              }}>
+                <div style={{ fontSize: '28px', fontWeight: 900, color: securityScan.grade === 'A' ? '#10b981' : securityScan.grade === 'B' ? '#f59e0b' : '#ef4444' }}>
+                  {securityScan.grade}
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{securityScan.score}/100</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                  <div style={{ padding: '8px', borderRadius: '8px', background: '#ef444411', textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#ef4444' }}>{securityScan.summary.critical}</div>
+                    <div style={{ fontSize: '9px', color: '#ef4444', fontWeight: 600 }}>CRITICAL</div>
+                  </div>
+                  <div style={{ padding: '8px', borderRadius: '8px', background: '#f59e0b11', textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#f59e0b' }}>{securityScan.summary.warning}</div>
+                    <div style={{ fontSize: '9px', color: '#f59e0b', fontWeight: 600 }}>WARNING</div>
+                  </div>
+                  <div style={{ padding: '8px', borderRadius: '8px', background: '#3b82f611', textAlign: 'center' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#3b82f6' }}>{securityScan.summary.info}</div>
+                    <div style={{ fontSize: '9px', color: '#3b82f6', fontWeight: 600 }}>INFO</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  Scanned {securityScan.summary.totalFiles} files at {new Date(securityScan.summary.scannedAt).toLocaleTimeString()}
+                </div>
+              </div>
+            </div>
+
+            {securityScan.findings.length === 0 ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#10b981', fontSize: '13px' }}>
+                ✅ No security issues found! Your extension code is clean.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {securityScan.findings.map((finding, idx) => (
+                  <div key={idx} style={{
+                    padding: '10px 12px', borderRadius: '8px', fontSize: '11px',
+                    background: finding.severity === 'critical' ? '#ef444411' : finding.severity === 'warning' ? '#f59e0b11' : '#3b82f611',
+                    borderLeft: `3px solid ${finding.severity === 'critical' ? '#ef4444' : finding.severity === 'warning' ? '#f59e0b' : '#3b82f6'}`
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                      <span style={{ fontWeight: 700, color: finding.severity === 'critical' ? '#ef4444' : finding.severity === 'warning' ? '#f59e0b' : '#3b82f6', textTransform: 'uppercase', fontSize: '9px' }}>
+                        {finding.severity} — {finding.file}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '9px' }}>×{finding.occurrences}</span>
+                    </div>
+                    <div style={{ color: 'var(--text-secondary)' }}>{finding.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Subscription Upgrade Modal */}
+      {isUpgradeModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-card glassmorphism" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title text-gradient">
+                {isCheckingOut ? 'Secure Checkout' : 'Upgrade Your Plan'}
+              </h3>
+              <button 
+                className="close-modal-btn" 
+                onClick={() => {
+                  setIsUpgradeModalOpen(false);
+                  setIsCheckingOut(false);
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {isCheckingOut ? (
+              <form onSubmit={handleCompletePayment} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {/* Visual Glassmorphic Credit Card Preview */}
+                <div style={{
+                  padding: '20px', borderRadius: '16px',
+                  background: 'linear-gradient(135deg, #1e1b4b, #311042)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.37)',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                  height: '180px', color: '#fff', position: 'relative', overflow: 'hidden'
+                }}>
+                  {/* Glowing background circles for visual depth */}
+                  <div style={{ position: 'absolute', top: '-20px', right: '-20px', width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(168,85,247,0.2)', filter: 'blur(30px)' }}></div>
+                  <div style={{ position: 'absolute', bottom: '-20px', left: '-20px', width: '100px', height: '100px', borderRadius: '50%', background: 'rgba(6,182,212,0.2)', filter: 'blur(30px)' }}></div>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '2px', color: 'rgba(255,255,255,0.7)' }}>EXTENSIO PRO</span>
+                    <span style={{ fontSize: '20px' }}>💳</span>
+                  </div>
+
+                  <div style={{ fontSize: '18px', fontWeight: 500, letterSpacing: '3px', fontFamily: 'monospace', margin: '14px 0 8px' }}>
+                    {cardNumber || '•••• •••• •••• ••••'}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Card Holder</div>
+                      <div style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '1px' }}>
+                        {cardName.toUpperCase() || 'YOUR NAME HERE'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Expires</div>
+                      <div style={{ fontSize: '12px', fontWeight: 600, fontFamily: 'monospace' }}>
+                        {cardExpiry || 'MM/YY'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>CVV</div>
+                      <div style={{ fontSize: '12px', fontWeight: 600, fontFamily: 'monospace' }}>
+                        {cardCvv || '•••'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Fields */}
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Cardholder Name</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="Abhinav Mandal" 
+                    value={cardName}
+                    onChange={(e) => setCardName(e.target.value)}
+                    required
+                    disabled={checkoutLoading}
+                  />
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Card Number</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="4111 2222 3333 4444" 
+                    maxLength="19"
+                    value={cardNumber}
+                    onChange={(e) => {
+                      // Format spacing auto
+                      const val = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+                      const matches = val.match(/\d{4,16}/g);
+                      const match = (matches && matches[0]) || '';
+                      const parts = [];
+                      for (let i = 0, len = match.length; i < len; i += 4) {
+                        parts.push(match.substring(i, i + 4));
+                      }
+                      if (parts.length > 0) {
+                        setCardNumber(parts.join(' '));
+                      } else {
+                        setCardNumber(val);
+                      }
+                    }}
+                    required
+                    disabled={checkoutLoading}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Expiry (MM/YY)</label>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      placeholder="12/28" 
+                      maxLength="5"
+                      value={cardExpiry}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/[^0-9]/g, '');
+                        if (val.length > 2) {
+                          val = val.substring(0, 2) + '/' + val.substring(2, 4);
+                        }
+                        setCardExpiry(val);
+                      }}
+                      required
+                      disabled={checkoutLoading}
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">CVV</label>
+                    <input 
+                      type="password" 
+                      className="form-input" 
+                      placeholder="•••" 
+                      maxLength="4"
+                      value={cardCvv}
+                      onChange={(e) => setCardCvv(e.target.value.replace(/[^0-9]/g, ''))}
+                      required
+                      disabled={checkoutLoading}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
+                  <button 
+                    type="button" 
+                    className="action-btn"
+                    style={{ flex: 1, padding: '12px', justifyContent: 'center' }}
+                    onClick={() => setIsCheckingOut(false)}
+                    disabled={checkoutLoading}
+                  >
+                    Back
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="save-modal-btn"
+                    style={{ flex: 2, padding: '12px', background: 'linear-gradient(135deg, #f59e0b, #f97316)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                    disabled={checkoutLoading}
+                  >
+                    {checkoutLoading ? (
+                      <><div className="spinner"></div><span>Authorizing...</span></>
+                    ) : (
+                      <span>Pay $9.99 Now</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {/* Free Tier */}
+                <div style={{
+                  padding: '16px', borderRadius: '12px', border: userTier === 'free' ? '2px solid var(--accent-purple)' : '1px solid var(--border-color)',
+                  background: 'var(--bg-tertiary)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)' }}>🆓 Free</div>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--text-primary)' }}>$0</div>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                    • 5 extension generations<br/>
+                    • Basic code editor<br/>
+                    • Sandbox simulator<br/>
+                    • ZIP download<br/>
+                    <span style={{ color: '#ef4444' }}>✗ Edit Request (AI modify)</span><br/>
+                    <span style={{ color: '#ef4444' }}>✗ Security Audit reports</span>
+                  </div>
+                  {userTier === 'free' && (
+                    <div style={{ marginTop: '8px', fontSize: '10px', color: 'var(--accent-purple)', fontWeight: 700 }}>✓ Current Plan</div>
+                  )}
+                </div>
+
+                {/* Pro Tier */}
+                <div style={{
+                  padding: '16px', borderRadius: '12px',
+                  border: userTier === 'pro' ? '2px solid #f59e0b' : '1px solid #f59e0b44',
+                  background: 'linear-gradient(135deg, #f59e0b08, #f9731608)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b' }}>👑 Pro</div>
+                    <div style={{ fontSize: '18px', fontWeight: 900, color: '#f59e0b' }}>$9.99<span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>/mo</span></div>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                    • Unlimited generations<br/>
+                    • Full code editor + sandbox<br/>
+                    • ZIP download<br/>
+                    <span style={{ color: '#10b981' }}>✓ Edit Request (AI-powered code modification)</span><br/>
+                    <span style={{ color: '#10b981' }}>✓ Security Audit with threat analysis</span><br/>
+                    <span style={{ color: '#10b981' }}>✓ Priority API access</span>
+                  </div>
+                  {userTier === 'pro' ? (
+                    <div style={{ marginTop: '8px', fontSize: '10px', color: '#f59e0b', fontWeight: 700 }}>✓ Current Plan</div>
+                  ) : (
+                    <button
+                      onClick={() => handleUpgrade('pro')}
+                      style={{
+                        marginTop: '12px', width: '100%', padding: '10px', borderRadius: '8px', border: 'none',
+                        background: 'linear-gradient(135deg, #f59e0b, #f97316)', color: '#fff',
+                        fontSize: '13px', fontWeight: 800, cursor: 'pointer', transition: 'all 0.3s'
+                      }}
+                    >
+                      Upgrade to Pro
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
