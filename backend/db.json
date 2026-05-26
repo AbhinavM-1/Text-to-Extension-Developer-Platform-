@@ -1,1 +1,146 @@
-[]
+[
+  {
+    "id": "7e7d60f3-f5c9-40bc-a519-991f4ae1975a",
+    "name": "Red Square Image Blocker",
+    "description": "Blocks images and replaces them with a red square.",
+    "createdAt": "2026-05-28T07:38:50.293Z",
+    "updatedAt": "2026-05-28T07:38:50.293Z",
+    "promptHistory": [
+      "Create a dark mode extension that injects a styling sheet to turn page backgrounds dark and text light, toggled via a floating widget."
+    ],
+    "versions": [
+      {
+        "version": 1,
+        "prompt": "Create a dark mode extension that injects a styling sheet to turn page backgrounds dark and text light, toggled via a floating widget.",
+        "createdAt": "2026-05-28T07:38:50.291Z",
+        "files": [
+          {
+            "name": "manifest.json",
+            "content": "{\n  \"manifest_version\": 3,\n  \"name\": \"Red Square Image Blocker\",\n  \"version\": \"1.0\",\n  \"content_scripts\": [\n    {\n      \"matches\": [\"<all_urls>\"],\n      \"js\": [\"content.js\"]\n    }\n  ],\n  \"action\": {\n    \"default_popup\": \"popup.html\"\n  }\n}"
+          },
+          {
+            "name": "content.js",
+            "content": "const images = document.querySelectorAll('img');\nimages.forEach(img => {\n  img.style.display = 'none';\n  const redSquare = document.createElement('div');\n  redSquare.style.width = (img.width || 100) + 'px';\n  redSquare.style.height = (img.height || 100) + 'px';\n  redSquare.style.backgroundColor = 'red';\n  img.parentNode.insertBefore(redSquare, img);\n});"
+          },
+          {
+            "name": "popup.html",
+            "content": "<!DOCTYPE html>\n<html>\n<head>\n  <style>body { width: 200px; padding: 10px; text-align: center; font-family: sans-serif; }</style>\n</head>\n<body>\n  <h3>Image Blocker Active</h3>\n  <p>All images are now red squares!</p>\n</body>\n</html>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "8e835abb-b3b2-4adc-bd18-fb21fad1c98f",
+    "name": "Red Square Image Blocker",
+    "description": "Blocks images and replaces them with a red square.",
+    "createdAt": "2026-05-28T10:49:13.652Z",
+    "updatedAt": "2026-05-28T10:50:38.027Z",
+    "promptHistory": [
+      " \"Make a Chrome extension that blocks all images on a website...\"",
+      "add a chrome extension to block all adds \n"
+    ],
+    "versions": [
+      {
+        "version": 1,
+        "prompt": " \"Make a Chrome extension that blocks all images on a website...\"",
+        "createdAt": "2026-05-28T10:49:13.643Z",
+        "files": [
+          {
+            "name": "manifest.json",
+            "content": "{\n  \"manifest_version\": 3,\n  \"name\": \"Red Square Image Blocker\",\n  \"version\": \"1.0\",\n  \"content_scripts\": [\n    {\n      \"matches\": [\"<all_urls>\"],\n      \"js\": [\"content.js\"]\n    }\n  ],\n  \"action\": {\n    \"default_popup\": \"popup.html\"\n  }\n}"
+          },
+          {
+            "name": "content.js",
+            "content": "const images = document.querySelectorAll('img');\nimages.forEach(img => {\n  img.style.display = 'none';\n  const redSquare = document.createElement('div');\n  redSquare.style.width = (img.width || 100) + 'px';\n  redSquare.style.height = (img.height || 100) + 'px';\n  redSquare.style.backgroundColor = 'red';\n  img.parentNode.insertBefore(redSquare, img);\n});"
+          },
+          {
+            "name": "popup.html",
+            "content": "<!DOCTYPE html>\n<html>\n<head>\n  <style>body { width: 200px; padding: 10px; text-align: center; font-family: sans-serif; }</style>\n</head>\n<body>\n  <h3>Image Blocker Active</h3>\n  <p>All images are now red squares!</p>\n</body>\n</html>"
+          }
+        ]
+      },
+      {
+        "version": 2,
+        "prompt": "add a chrome extension to block all adds \n",
+        "createdAt": "2026-05-28T10:50:38.016Z",
+        "files": [
+          {
+            "name": "manifest.json",
+            "content": "{\n  \"manifest_version\": 3,\n  \"name\": \"Red Square Image Blocker\",\n  \"version\": \"1.0\",\n  \"content_scripts\": [\n    {\n      \"matches\": [\"<all_urls>\"],\n      \"js\": [\"content.js\"]\n    }\n  ],\n  \"action\": {\n    \"default_popup\": \"popup.html\"\n  }\n}"
+          },
+          {
+            "name": "content.js",
+            "content": "const images = document.querySelectorAll('img');\nimages.forEach(img => {\n  img.style.display = 'none';\n  const redSquare = document.createElement('div');\n  redSquare.style.width = (img.width || 100) + 'px';\n  redSquare.style.height = (img.height || 100) + 'px';\n  redSquare.style.backgroundColor = 'red';\n  img.parentNode.insertBefore(redSquare, img);\n});"
+          },
+          {
+            "name": "popup.html",
+            "content": "<!DOCTYPE html>\n<html>\n<head>\n  <style>body { width: 200px; padding: 10px; text-align: center; font-family: sans-serif; }</style>\n</head>\n<body>\n  <h3>Image Blocker Active</h3>\n  <p>All images are now red squares!</p>\n</body>\n</html>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "d65fde68-67cf-4d01-a710-ad59e1fd0e49",
+    "name": "Universal Ad Blocker Pro",
+    "description": "Blocks all ads, popups, and tracking elements from the page.",
+    "createdAt": "2026-05-28T10:57:08.489Z",
+    "updatedAt": "2026-05-28T10:57:08.489Z",
+    "promptHistory": [
+      "Reome all the unnecessary popups\n"
+    ],
+    "versions": [
+      {
+        "version": 1,
+        "prompt": "Reome all the unnecessary popups\n",
+        "createdAt": "2026-05-28T10:57:08.477Z",
+        "files": [
+          {
+            "name": "manifest.json",
+            "content": "{\n  \"manifest_version\": 3,\n  \"name\": \"Universal Ad Blocker Pro\",\n  \"version\": \"1.0\",\n  \"content_scripts\": [\n    {\n      \"matches\": [\"<all_urls>\"],\n      \"js\": [\"content.js\"]\n    }\n  ],\n  \"action\": {\n    \"default_popup\": \"popup.html\"\n  }\n}"
+          },
+          {
+            "name": "content.js",
+            "content": "const adSelectors = ['.ad', '.ads', '.advertisement', '.banner', '.sponsored', '[id*=\"google_ads\"]', '[class*=\"ad-\"]', '[class*=\"-ad\"]', 'ins.adsbygoogle'];\nfunction blockAds() {\n  adSelectors.forEach(selector => {\n    try {\n      document.querySelectorAll(selector).forEach(el => {\n        el.style.setProperty('display', 'none', 'important');\n      });\n    } catch(e) {}\n  });\n}\nblockAds();\nsetInterval(blockAds, 1000);"
+          },
+          {
+            "name": "popup.html",
+            "content": "<!DOCTYPE html>\n<html>\n<head>\n  <style>body { width: 220px; padding: 15px; text-align: center; font-family: sans-serif; background: #111827; color: #f9fafb; border-radius: 8px; } h3 { color: #f43f5e; margin-top: 0; }</style>\n</head>\n<body>\n  <h3>🛡️ Shield Active</h3>\n  <p>Universal Ad Blocker Pro is protecting you.</p>\n</body>\n</html>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "7834ff79-7505-4480-9267-d7b3123fd04e",
+    "name": "Universal Ad Blocker Pro",
+    "description": "Blocks all ads, popups, and tracking elements from the page.",
+    "createdAt": "2026-05-28T11:18:19.202Z",
+    "updatedAt": "2026-05-28T11:18:19.202Z",
+    "promptHistory": [
+      "Create a dark mode extension that injects a styling sheet to turn page backgrounds dark and text light, toggled via a floating widget."
+    ],
+    "versions": [
+      {
+        "version": 1,
+        "prompt": "Create a dark mode extension that injects a styling sheet to turn page backgrounds dark and text light, toggled via a floating widget.",
+        "createdAt": "2026-05-28T11:18:19.193Z",
+        "files": [
+          {
+            "name": "manifest.json",
+            "content": "{\n  \"manifest_version\": 3,\n  \"name\": \"Universal Ad Blocker Pro\",\n  \"version\": \"1.0\",\n  \"content_scripts\": [\n    {\n      \"matches\": [\"<all_urls>\"],\n      \"js\": [\"content.js\"]\n    }\n  ],\n  \"action\": {\n    \"default_popup\": \"popup.html\"\n  }\n}"
+          },
+          {
+            "name": "content.js",
+            "content": "const adSelectors = ['.ad', '.ads', '.advertisement', '.banner', '.sponsored', '[id*=\"google_ads\"]', '[class*=\"ad-\"]', '[class*=\"-ad\"]', 'ins.adsbygoogle'];\nfunction blockAds() {\n  adSelectors.forEach(selector => {\n    try {\n      document.querySelectorAll(selector).forEach(el => {\n        el.style.setProperty('display', 'none', 'important');\n      });\n    } catch(e) {}\n  });\n}\nblockAds();\nsetInterval(blockAds, 1000);"
+          },
+          {
+            "name": "popup.html",
+            "content": "<!DOCTYPE html>\n<html>\n<head>\n  <style>body { width: 220px; padding: 15px; text-align: center; font-family: sans-serif; background: #111827; color: #f9fafb; border-radius: 8px; } h3 { color: #f43f5e; margin-top: 0; }</style>\n</head>\n<body>\n  <h3>🛡️ Shield Active</h3>\n  <p>Universal Ad Blocker Pro is protecting you.</p>\n</body>\n</html>"
+          }
+        ]
+      }
+    ]
+  }
+]
