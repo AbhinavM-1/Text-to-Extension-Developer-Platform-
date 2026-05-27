@@ -1,4 +1,6 @@
 import express from 'express';
+import dotenv from 'dotenv';
+dotenv.config();
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
@@ -225,15 +227,16 @@ app.get('/api/projects', (req, res) => {
 
 // Endpoint to generate/iterate extension
 app.post('/api/generate', async (req, res) => {
-  const { prompt, projectId, parentVersion, apiKey: frontendApiKey } = req.body;
-  const apiKey = frontendApiKey || process.env.GEMINI_API_KEY;
+  const { prompt, projectId, parentVersion, apiKey: frontendApiKey, aiProvider: frontendAiProvider } = req.body;
+  const apiKey = frontendApiKey || process.env.OPENAI_API_KEY;
+  const aiProvider = frontendAiProvider || 'openai';
 
   if (!prompt) {
     return res.status(400).json({ error: 'Prompt is required' });
   }
   if (!apiKey) {
     return res.status(400).json({ 
-      error: 'Gemini API Key is missing. Please configure it in your Settings panel or set GEMINI_API_KEY in the server environment.' 
+      error: 'OpenAI API Key is missing. Please configure it in your Settings panel or set OPENAI_API_KEY in the server environment.' 
     });
   }
 
@@ -270,55 +273,80 @@ Modify the existing files or create new ones to achieve this request. Provide th
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    
-    const requestBody = {
-      contents: [{
-        parts: [{ text: promptContent }]
-      }],
-      systemInstruction: {
-        parts: [{ text: systemContext }]
-      },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            name: { type: "STRING" },
-            description: { type: "STRING" },
-            files: {
-              type: "ARRAY",
-              items: {
-                type: "OBJECT",
-                properties: {
-                  name: { type: "STRING" },
-                  content: { type: "STRING" }
-                },
-                required: ["name", "content"]
-              }
-            }
-          },
-          required: ["name", "description", "files"]
+    let rawText = '';
+    try {
+      if (aiProvider === 'gemini') {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: systemContext }] },
+            contents: [{ parts: [{ text: promptContent }] }],
+            generationConfig: { response_mime_type: 'application/json', temperature: 0.7 }
+          })
+        });
+        if (!response.ok) {
+          const errBody = await response.text();
+          console.error('Gemini error body:', errBody);
+          throw new Error(`Gemini API Error ${response.status}`);
         }
+        const result = await response.json();
+        rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      } else if (aiProvider === 'anthropic') {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-5-sonnet-20240620',
+            max_tokens: 4096,
+            system: systemContext,
+            messages: [{ role: 'user', content: promptContent }]
+          })
+        });
+        if (!response.ok) {
+          const errBody = await response.text();
+          console.error('Anthropic error body:', errBody);
+          throw new Error(`Anthropic API Error ${response.status}`);
+        }
+        const result = await response.json();
+        rawText = result.content?.[0]?.text;
+      } else {
+        // Default to OpenAI
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: systemContext },
+              { role: 'user', content: promptContent }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.7
+          })
+        });
+        if (!response.ok) {
+          const errBody = await response.text();
+          console.error('OpenAI error body:', errBody);
+          throw new Error(`OpenAI API Error ${response.status}`);
+        }
+        const result = await response.json();
+        rawText = result.choices?.[0]?.message?.content;
       }
-    };
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API returned error ${response.status}: ${errorText}`);
+    } catch (apiErr) {
+      console.error('API call failed:', apiErr.message);
+      throw apiErr;
     }
-
-    const result = await response.json();
-    const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
     
     if (!rawText) {
-      throw new Error('Gemini API returned an empty response.');
+      throw new Error('API returned an empty response and mock fallback failed.');
     }
 
     const cleanedText = cleanJSONResponse(rawText);
@@ -549,6 +577,202 @@ app.post('/api/projects/:projectId/metadata', (req, res) => {
 
   writeDB(db);
   res.json(project);
+});
+
+// ========== WEEK 4: CODE SANITIZATION ENGINE ==========
+const DANGEROUS_PATTERNS = [
+  { pattern: /eval\s*\(/gi, severity: 'critical', label: 'eval() usage detected — potential arbitrary code execution' },
+  { pattern: /new\s+Function\s*\(/gi, severity: 'critical', label: 'new Function() constructor — potential arbitrary code execution' },
+  { pattern: /document\.write\s*\(/gi, severity: 'warning', label: 'document.write() usage — potential XSS vector' },
+  { pattern: /innerHTML\s*=/gi, severity: 'warning', label: 'innerHTML assignment — potential XSS vector' },
+  { pattern: /outerHTML\s*=/gi, severity: 'warning', label: 'outerHTML assignment — potential XSS vector' },
+  { pattern: /XMLHttpRequest|fetch\s*\(\s*['"`]https?:\/\/(?!api\.openai\.com|generativelanguage\.googleapis\.com)/gi, severity: 'warning', label: 'External network request detected — verify destination URL' },
+  { pattern: /chrome\.cookies/gi, severity: 'critical', label: 'chrome.cookies API access — sensitive data exposure risk' },
+  { pattern: /chrome\.history/gi, severity: 'warning', label: 'chrome.history API access — privacy-sensitive data' },
+  { pattern: /chrome\.bookmarks/gi, severity: 'info', label: 'chrome.bookmarks API access — user data' },
+  { pattern: /chrome\.tabs\.executeScript/gi, severity: 'critical', label: 'Dynamic script injection via chrome.tabs — code execution risk' },
+  { pattern: /chrome\.debugger/gi, severity: 'critical', label: 'chrome.debugger API — highly privileged access' },
+  { pattern: /crypto\s*\.\s*subtle/gi, severity: 'info', label: 'Web Crypto API usage — review cryptographic operations' },
+  { pattern: /CryptoMiner|coinhive|coin-hive|minero/gi, severity: 'critical', label: 'Potential cryptocurrency mining code detected' },
+  { pattern: /keydown|keyup|keypress/gi, severity: 'warning', label: 'Keyboard event listener — potential keylogging' },
+  { pattern: /password|passwd|creditcard|credit_card|ssn/gi, severity: 'warning', label: 'References to sensitive data fields detected' },
+  { pattern: /atob\s*\(|btoa\s*\(/gi, severity: 'info', label: 'Base64 encoding/decoding — review for obfuscated payloads' },
+  { pattern: /window\.open\s*\(/gi, severity: 'info', label: 'window.open() usage — potential popup/redirect' },
+  { pattern: /<script[^>]*src\s*=\s*['"]https?:\/\//gi, severity: 'critical', label: 'External script loading in HTML — potential supply chain risk' },
+];
+
+const scanCodeForThreats = (files) => {
+  const findings = [];
+  let criticalCount = 0;
+  let warningCount = 0;
+  let infoCount = 0;
+
+  files.forEach(file => {
+    if (!file.content || file.name.toLowerCase() === 'manifest.json') return;
+    
+    DANGEROUS_PATTERNS.forEach(({ pattern, severity, label }) => {
+      // Reset regex state
+      pattern.lastIndex = 0;
+      const matches = file.content.match(pattern);
+      if (matches) {
+        findings.push({
+          file: file.name,
+          severity,
+          label,
+          occurrences: matches.length
+        });
+        if (severity === 'critical') criticalCount += matches.length;
+        else if (severity === 'warning') warningCount += matches.length;
+        else infoCount += matches.length;
+      }
+    });
+  });
+
+  const score = Math.max(0, 100 - (criticalCount * 25) - (warningCount * 10) - (infoCount * 2));
+  const grade = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 50 ? 'C' : score >= 25 ? 'D' : 'F';
+
+  return {
+    score,
+    grade,
+    findings,
+    summary: {
+      critical: criticalCount,
+      warning: warningCount,
+      info: infoCount,
+      totalFiles: files.length,
+      scannedAt: new Date().toISOString()
+    }
+  };
+};
+
+// Endpoint: Run security scan on a project version
+app.post('/api/projects/:projectId/versions/:version/security-scan', (req, res) => {
+  const { projectId, version } = req.params;
+  const db = readDB();
+  const project = db.find(p => p.id === projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  const verNum = parseInt(version);
+  const ver = project.versions.find(v => v.version === verNum);
+  if (!ver) return res.status(404).json({ error: 'Version not found' });
+
+  const scanResult = scanCodeForThreats(ver.files);
+  res.json(scanResult);
+});
+
+// ========== WEEK 3: EDIT REQUEST ENDPOINT (AI-powered iterative modification) ==========
+const EDIT_SYSTEM_INSTRUCTION = `You are a world-class AI Chrome Extension Developer expert. 
+You are being asked to MODIFY an existing Chrome Extension based on the user's edit request.
+
+CRITICAL RULES:
+1. You MUST preserve ALL existing functionality unless the user explicitly asks to remove it.
+2. Apply ONLY the requested changes — do not refactor, rename, or restructure anything unnecessarily.
+3. You MUST use Manifest V3.
+4. Every file referenced in manifest.json must exist in the files list.
+5. Return the COMPLETE set of files (both modified and unmodified) in your response.
+6. If the change only affects one file, still return all other files unchanged.
+
+OUTPUT FORMAT:
+You MUST output ONLY a valid JSON object. Do NOT wrap in markdown code blocks.
+
+{
+  "name": "Extension name (keep existing unless rename requested)",
+  "description": "Extension description (update if behavior changed)",
+  "files": [
+    {
+      "name": "manifest.json",
+      "content": "{ ... }"
+    },
+    ...all other files...
+  ]
+}`;
+
+app.post('/api/edit', async (req, res) => {
+  const { projectId, version, editPrompt, apiKey: frontendApiKey } = req.body;
+  const apiKey = frontendApiKey || process.env.OPENAI_API_KEY;
+
+  if (!editPrompt) return res.status(400).json({ error: 'Edit prompt is required' });
+  if (!projectId) return res.status(400).json({ error: 'Project ID is required' });
+  if (!apiKey) return res.status(400).json({ error: 'API Key is required' });
+
+  const db = readDB();
+  const project = db.find(p => p.id === projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  const verNum = parseInt(version) || project.versions[project.versions.length - 1].version;
+  const ver = project.versions.find(v => v.version === verNum);
+  if (!ver) return res.status(404).json({ error: 'Version not found' });
+
+  // Build context with current files
+  let fileContext = `Below are ALL the current files in this Chrome Extension (Version ${verNum}):\n`;
+  ver.files.forEach(f => {
+    fileContext += `\n--- File: ${f.name} ---\n${f.content}\n`;
+  });
+
+  const userPrompt = `${fileContext}\n\nEDIT REQUEST: "${editPrompt}"\n\nApply this edit to the extension. Return the full updated file set.`;
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: EDIT_SYSTEM_INSTRUCTION },
+          { role: 'user', content: userPrompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API error ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    const rawText = result.choices?.[0]?.message?.content;
+    if (!rawText) throw new Error('OpenAI returned empty response');
+
+    const cleanedText = cleanJSONResponse(rawText);
+    const extensionData = JSON.parse(cleanedText);
+
+    if (!extensionData.files || !Array.isArray(extensionData.files)) {
+      throw new Error('LLM output missing files array');
+    }
+
+    // Create new version from edit
+    const newVersion = {
+      version: project.versions.length + 1,
+      prompt: `[Edit] ${editPrompt}`,
+      createdAt: new Date().toISOString(),
+      files: extensionData.files
+    };
+
+    // Validate before saving
+    writeToTempAndValidate(project, newVersion);
+
+    // Run security scan on new code
+    const securityScan = scanCodeForThreats(extensionData.files);
+
+    project.versions.push(newVersion);
+    project.promptHistory = project.promptHistory || [];
+    project.promptHistory.push(`[Edit] ${editPrompt}`);
+    project.name = extensionData.name || project.name;
+    project.description = extensionData.description || project.description;
+    project.updatedAt = new Date().toISOString();
+
+    writeDB(db);
+    res.json({ project, securityScan });
+
+  } catch (err) {
+    console.error('Edit Error:', err);
+    res.status(500).json({ error: err.message || 'Failed to apply edit' });
+  }
 });
 
 // Start backend
