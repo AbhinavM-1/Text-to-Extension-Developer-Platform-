@@ -2,3 +2,14 @@ node_modules/
 dist/
 .env
 .DS_Store
+*.log
+backend/temp/
+backend/storage/
+backend-dev*.log
+backend-fixed*.log
+backend-restart*.log
+backend-fallback*.log
+frontend-dev*.log
+frontend-dev-fixed*.log
+commit_script.ps1
+test-models.js
