@@ -1,163 +1,24 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;600&display=swap');
+@import "tailwindcss";
 
 :root {
-  /* Colors - Obsidian Space & Crimson Gold */
-  --bg-deep: #05050A;
-  --bg-panel: #0A0A12;
-  --bg-card: #12121D;
-  --bg-input: #181824;
-  
-  --text-primary: #fdfdfd;
-  --text-secondary: #a1a1aa;
-  --text-muted: #52525b;
-  
-  --accent-cyan: #f43f5e; /* Rose */
-  --accent-purple: #f59e0b; /* Gold/Amber */
-  --accent-purple-glow: rgba(245, 158, 11, 0.4);
-  --accent-cyan-glow: rgba(244, 63, 94, 0.4);
-  
-  --border-light: rgba(255, 255, 255, 0.04);
-  --border-accent: rgba(244, 63, 94, 0.3);
-  
-  --success: #10b981;
-  --error: #ef4444;
-  
-  /* Fonts */
-  --font-sans: 'Outfit', system-ui, -apple-system, sans-serif;
-  --font-mono: 'Fira Code', monospace;
-  
-  /* Layout */
-  --sidebar-width: 320px;
-}
-
-[data-theme="light"] {
-  /* Light theme overrides */
-  --bg-deep: #ffffff;
-  --bg-panel: #f8fafc;
-  --bg-card: #ffffff;
-  --bg-input: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --accent-cyan: #e11d48;
-  --accent-purple: #d97706;
-  --border-light: rgba(0,0,0,0.06);
-  --border-accent: rgba(225, 29, 72, 0.3);
-  --success: #059669;
-  --error: #dc2626;
-}
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
 }
 
 body {
-  background-color: var(--bg-deep);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
+  margin: 0;
+  min-width: 320px;
   min-height: 100vh;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--bg-deep);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 8px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-purple);
-}
-
-/* Animations */
-@keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 20px var(--accent-purple-glow);
-  }
-  50% {
-    box-shadow: 0 0 35px rgba(245, 158, 11, 0.7);
-  }
-}
-
-@keyframes pulseCyanGlow {
-  0%, 100% {
-    box-shadow: 0 0 15px var(--accent-cyan-glow);
-  }
-  50% {
-    box-shadow: 0 0 25px rgba(244, 63, 94, 0.7);
-  }
-}
-
-@keyframes slideInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes smoothScaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes sweepGlow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Utilities */
-.glassmorphism {
-  background: rgba(18, 18, 29, 0.6);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid var(--border-light);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-}
-
-.text-gradient {
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  background-size: 200% 200%;
-  animation: sweepGlow 4s ease infinite;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.text-gradient-purple {
-  background: linear-gradient(135deg, #fbbf24, var(--accent-purple));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+.code-pane {
+  font-family: "Fira Code", "SFMono-Regular", Consolas, monospace;
 }
