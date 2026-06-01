@@ -15,9 +15,13 @@ PORT=3001
 CLIENT_ORIGIN=http://localhost:5173
 MONGODB_URI=mongodb://127.0.0.1:27017/extensio_ai
 JWT_SECRET=replace-with-a-long-random-secret
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini
+AI_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
+
+The backend uses Groq for AI generation. It falls back to local templates when Groq is missing, out of quota, or unavailable.
 
 For production, set `CLIENT_ORIGIN` to the deployed frontend URL and use a managed MongoDB URI.
 

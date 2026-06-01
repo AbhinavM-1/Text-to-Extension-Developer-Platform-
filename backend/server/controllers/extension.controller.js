@@ -1,6 +1,6 @@
 import { Extension } from '../models/Extension.js';
 import { buildEditPrompt, buildGenerationPrompt } from '../services/prompt.service.js';
-import { generateExtensionJson } from '../services/ai.service.js';
+import { generateExtensionJson, localTemplatePayload } from '../services/ai.service.js';
 import { normalizeFiles, validateExtensionFiles } from '../services/validator.service.js';
 import { scanGeneratedFiles } from '../services/security.service.js';
 import { packageExtension } from '../services/zip.service.js';
@@ -18,13 +18,7 @@ export async function listExtensions(req, res, next) {
 
 export async function generateExtension(req, res, next) {
   try {
-    const aiPayload = await generateExtensionJson(buildGenerationPrompt(req.body.prompt));
-    const files = normalizeFiles(aiPayload);
-    const manifest = validateExtensionFiles(files);
-    const securityScan = scanGeneratedFiles(files);
-    if (securityScan.findings.some(item => item.severity === 'critical')) {
-      return res.status(422).json({ message: 'Generated code failed malicious-code detection', securityScan });
-    }
+    const { aiPayload, files, manifest, securityScan } = await buildSafeGeneratedExtension(req.body.prompt);
 
     const extension = await Extension.create({
       owner: req.user._id,
@@ -46,6 +40,25 @@ export async function generateExtension(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+async function buildSafeGeneratedExtension(prompt) {
+  try {
+    return validateGeneratedPayload(await generateExtensionJson(buildGenerationPrompt(prompt)));
+  } catch (error) {
+    console.warn(`Groq generation rejected, using safe local template: ${error.message}`);
+    return validateGeneratedPayload(localTemplatePayload(prompt));
+  }
+}
+
+function validateGeneratedPayload(aiPayload) {
+  const files = normalizeFiles(aiPayload);
+  const manifest = validateExtensionFiles(files);
+  const securityScan = scanGeneratedFiles(files);
+  if (securityScan.findings.some(item => item.severity === 'critical')) {
+    throw new Error('Generated code failed malicious-code detection');
+  }
+  return { aiPayload, files, manifest, securityScan };
 }
 
 export async function getExtension(req, res, next) {

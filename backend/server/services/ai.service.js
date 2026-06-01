@@ -2,42 +2,63 @@ import OpenAI from 'openai';
 import { EXTENSION_SYSTEM_PROMPT } from './prompt.service.js';
 
 export async function generateExtensionJson(userPrompt) {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     return localTemplatePayload(userPrompt);
   }
 
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: EXTENSION_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-    });
-
-    return JSON.parse(response.choices[0].message.content);
+    return generateWithGroq(userPrompt);
   } catch (error) {
-    if (isRecoverableOpenAIQuotaError(error)) {
-      console.warn('OpenAI quota/rate limit unavailable, using local template fallback.');
+    if (isRecoverableProviderError(error)) {
+      console.warn('Groq unavailable, using local template fallback.');
       return localTemplatePayload(userPrompt);
     }
     throw error;
   }
 }
 
-function isRecoverableOpenAIQuotaError(error) {
+async function generateWithGroq(userPrompt) {
+  const groq = new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
+  });
+
+  return createJsonCompletion({
+    client: groq,
+    model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
+    userPrompt,
+  });
+}
+
+async function createJsonCompletion({ client, model, userPrompt }) {
+  const response = await client.chat.completions.create({
+    model,
+    response_format: { type: 'json_object' },
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: EXTENSION_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+  });
+
+  return JSON.parse(response.choices[0].message.content);
+}
+
+function isRecoverableProviderError(error) {
   const message = String(error?.message || '').toLowerCase();
   return error?.status === 429
+    || error?.status === 401
+    || error?.status === 403
+    || error?.status >= 500
     || error?.code === 'insufficient_quota'
     || error?.code === 'rate_limit_exceeded'
     || message.includes('quota')
-    || message.includes('rate limit');
+    || message.includes('rate limit')
+    || message.includes('invalid api key')
+    || message.includes('json');
 }
 
-function localTemplatePayload(userPrompt = '') {
+export function localTemplatePayload(userPrompt = '') {
   const prompt = userPrompt.toLowerCase();
   if (prompt.includes('dark mode') || prompt.includes('darkmode')) return darkModePayload();
   if (prompt.includes('highlight') && prompt.includes('link')) return linkHighlighterPayload(userPrompt);
@@ -65,6 +86,10 @@ function imageSquarePayload(userPrompt = '') {
           action: { default_popup: 'popup.html' },
           content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['style.css'], run_at: 'document_idle' }],
         }, null, 2),
+      },
+      {
+        filename: 'background.js',
+        content: "chrome.runtime.onInstalled.addListener(()=>console.log('Extensio extension installed'));",
       },
       {
         filename: 'content.js',
@@ -196,6 +221,10 @@ function extensionPayload({ name, description, contentJs, styleCss, popupMessage
         action: { default_popup: 'popup.html' },
         content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['style.css'], run_at: 'document_idle' }],
       }, null, 2),
+    },
+    {
+      filename: 'background.js',
+      content: "chrome.runtime.onInstalled.addListener(()=>console.log('Extensio extension installed'));",
     },
     { filename: 'content.js', content: contentJs },
     { filename: 'style.css', content: styleCss || '/* No styles required. */' },

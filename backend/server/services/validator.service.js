@@ -1,4 +1,5 @@
 const allowedExtensions = new Set(['.json', '.js', '.html', '.css', '.png', '.svg', '.txt']);
+const requiredFilenames = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'style.css'];
 
 export function normalizeFiles(aiPayload) {
   if (!aiPayload || !Array.isArray(aiPayload.files)) {
@@ -28,6 +29,12 @@ export function validateExtensionFiles(files) {
 
   const manifestFile = files.find(file => file.filename === 'manifest.json');
   if (!manifestFile) throwValidation('manifest.json is required');
+
+  for (const filename of requiredFilenames) {
+    if (!files.some(file => file.filename === filename)) {
+      throwValidation(`${filename} is required`);
+    }
+  }
 
   let manifest;
   try {
