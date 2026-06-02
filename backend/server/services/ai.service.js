@@ -3,15 +3,16 @@ import { EXTENSION_SYSTEM_PROMPT } from './prompt.service.js';
 
 export async function generateExtensionJson(userPrompt) {
   if (!process.env.GROQ_API_KEY) {
-    return localTemplatePayload(userPrompt);
+    const error = new Error('GROQ_API_KEY is missing. Add it to backend/.env.');
+    error.status = 503;
+    throw error;
   }
 
   try {
     return generateWithGroq(userPrompt);
   } catch (error) {
     if (isRecoverableProviderError(error)) {
-      console.warn('Groq unavailable, using local template fallback.');
-      return localTemplatePayload(userPrompt);
+      error.status = error.status || 502;
     }
     throw error;
   }
@@ -33,7 +34,6 @@ async function generateWithGroq(userPrompt) {
 async function createJsonCompletion({ client, model, userPrompt }) {
   const response = await client.chat.completions.create({
     model,
-    response_format: { type: 'json_object' },
     temperature: 0.2,
     messages: [
       { role: 'system', content: EXTENSION_SYSTEM_PROMPT },
@@ -41,7 +41,26 @@ async function createJsonCompletion({ client, model, userPrompt }) {
     ],
   });
 
-  return JSON.parse(response.choices[0].message.content);
+  return parseJsonObject(response.choices[0].message.content);
+}
+
+function parseJsonObject(content = '') {
+  const cleaned = content.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    }
+    throw new Error('Groq did not return valid extension JSON.');
+  }
 }
 
 function isRecoverableProviderError(error) {
@@ -70,19 +89,21 @@ export function localTemplatePayload(userPrompt = '') {
 
 function imageSquarePayload(userPrompt = '') {
   const color = extractRequestedColor(userPrompt);
+  const shape = extractRequestedShape(userPrompt);
   const titleColor = color.label.charAt(0).toUpperCase() + color.label.slice(1);
+  const titleShape = shape.label.charAt(0).toUpperCase() + shape.label.slice(1);
 
   return {
-    name: `${titleColor} Image Replacer`,
-    description: `Replaces page images with ${color.label} squares.`,
+    name: `${titleColor} ${titleShape} Image Replacer`,
+    description: `Replaces page images with ${color.label} ${shape.plural}.`,
     files: [
       {
         filename: 'manifest.json',
         content: JSON.stringify({
           manifest_version: 3,
-          name: `${titleColor} Image Replacer`,
+          name: `${titleColor} ${titleShape} Image Replacer`,
           version: '1.0.0',
-          description: `Replaces page images with ${color.label} squares.`,
+          description: `Replaces page images with ${color.label} ${shape.plural}.`,
           action: { default_popup: 'popup.html' },
           content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['style.css'], run_at: 'document_idle' }],
         }, null, 2),
@@ -93,15 +114,15 @@ function imageSquarePayload(userPrompt = '') {
       },
       {
         filename: 'content.js',
-        content: "function replaceImages(){document.querySelectorAll('img').forEach((img)=>{const box=document.createElement('div');box.className='extensio-image-square';box.style.width=(img.width||160)+'px';box.style.height=(img.height||120)+'px';img.replaceWith(box);});}replaceImages();new MutationObserver(replaceImages).observe(document.documentElement,{childList:true,subtree:true});",
+        content: `function replaceImages(){document.querySelectorAll('img').forEach((img)=>{const box=document.createElement('div');box.className='extensio-image-replacement extensio-shape-${shape.label}';const width=img.width||160;const height=img.height||120;box.style.width=${shape.forceSquare ? 'Math.max(width,height)' : 'width'}+'px';box.style.height=${shape.forceSquare ? 'Math.max(width,height)' : 'height'}+'px';img.replaceWith(box);});}replaceImages();new MutationObserver(replaceImages).observe(document.documentElement,{childList:true,subtree:true});`,
       },
       {
         filename: 'style.css',
-        content: `.extensio-image-square{display:inline-block;background:${color.hex};border:2px solid ${color.border};box-sizing:border-box;}`,
+        content: `.extensio-image-replacement{display:inline-block;background:${color.hex};border:2px solid ${color.border};box-sizing:border-box}.extensio-shape-circle{border-radius:9999px}.extensio-shape-rounded-box,.extensio-shape-rounded-rectangle{border-radius:12px}`,
       },
       {
         filename: 'popup.html',
-        content: `<!doctype html><html><head><meta charset="utf-8"><title>${titleColor} Image Replacer</title><style>body{width:220px;font-family:Arial,sans-serif;margin:16px;color:#111827}h1{font-size:16px;margin:0 0 8px}</style></head><body><h1>${titleColor} Image Replacer</h1><p>Images are replaced with ${color.label} squares automatically.</p><script src="popup.js"></script></body></html>`,
+        content: `<!doctype html><html><head><meta charset="utf-8"><title>${titleColor} ${titleShape} Image Replacer</title><style>body{width:220px;font-family:Arial,sans-serif;margin:16px;color:#111827}h1{font-size:16px;margin:0 0 8px}</style></head><body><h1>${titleColor} ${titleShape} Image Replacer</h1><p>Images are replaced with ${color.label} ${shape.plural} automatically.</p><script src="popup.js"></script></body></html>`,
       },
       {
         filename: 'popup.js',
@@ -109,6 +130,21 @@ function imageSquarePayload(userPrompt = '') {
       },
     ],
   };
+}
+
+function extractRequestedShape(prompt) {
+  const lowerPrompt = prompt.toLowerCase();
+  const shapes = [
+    { terms: ['rounded rectangle'], label: 'rounded-rectangle', plural: 'rounded rectangles', forceSquare: false },
+    { terms: ['rounded box'], label: 'rounded-box', plural: 'rounded boxes', forceSquare: false },
+    { terms: ['rectangle', 'rectangular'], label: 'rectangle', plural: 'rectangles', forceSquare: false },
+    { terms: ['circle', 'round'], label: 'circle', plural: 'circles', forceSquare: true },
+    { terms: ['box', 'boxes'], label: 'box', plural: 'boxes', forceSquare: false },
+    { terms: ['square', 'squares'], label: 'square', plural: 'squares', forceSquare: true },
+  ];
+
+  return shapes.find(shape => shape.terms.some(term => lowerPrompt.includes(term)))
+    || { label: 'box', plural: 'boxes', forceSquare: false };
 }
 
 function adBlockerPayload() {

@@ -1,6 +1,6 @@
 import { Extension } from '../models/Extension.js';
 import { buildEditPrompt, buildGenerationPrompt } from '../services/prompt.service.js';
-import { generateExtensionJson, localTemplatePayload } from '../services/ai.service.js';
+import { generateExtensionJson } from '../services/ai.service.js';
 import { normalizeFiles, validateExtensionFiles } from '../services/validator.service.js';
 import { scanGeneratedFiles } from '../services/security.service.js';
 import { packageExtension } from '../services/zip.service.js';
@@ -46,9 +46,23 @@ async function buildSafeGeneratedExtension(prompt) {
   try {
     return validateGeneratedPayload(await generateExtensionJson(buildGenerationPrompt(prompt)));
   } catch (error) {
-    console.warn(`Groq generation rejected, using safe local template: ${error.message}`);
-    return validateGeneratedPayload(localTemplatePayload(prompt));
+    console.warn(`Groq generation needs repair: ${error.message}`);
+    return validateGeneratedPayload(await generateExtensionJson(buildRepairPrompt(prompt, error)));
   }
+}
+
+function buildRepairPrompt(originalPrompt, error) {
+  return `The previous Chrome extension generation failed validation.
+
+Original user request:
+${originalPrompt}
+
+Validation/security error:
+${error.message}
+
+Regenerate the complete extension from scratch. Preserve the user's exact requested behavior and wording. For example, if the user asks for "red box", use "red box" and "red boxes", not "red square".
+
+Return JSON only in the required Extensio.ai files format.`;
 }
 
 function validateGeneratedPayload(aiPayload) {

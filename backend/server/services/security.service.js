@@ -1,6 +1,6 @@
 const dangerousPatterns = [
   { pattern: /\beval\s*\(/i, severity: 'critical', message: 'Uses eval, which can execute arbitrary code.' },
-  { pattern: /\bFunction\s*\(/i, severity: 'critical', message: 'Uses Function constructor for dynamic code execution.' },
+  { pattern: /\bnew\s+Function\s*\(|\bFunction\s*\(/, severity: 'critical', message: 'Uses Function constructor for dynamic code execution.' },
   { pattern: /document\.write\s*\(/i, severity: 'warning', message: 'Uses document.write, which can create injection risks.' },
   { pattern: /chrome\.tabs\.executeScript/i, severity: 'warning', message: 'Uses deprecated script execution API.' },
   { pattern: /<script[^>]+src=["']https?:\/\//i, severity: 'critical', message: 'Loads remote script code, disallowed for Chrome extensions.' },
