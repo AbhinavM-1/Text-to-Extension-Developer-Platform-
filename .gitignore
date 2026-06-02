@@ -5,6 +5,7 @@ dist/
 *.log
 backend/temp/
 backend/storage/
+backend/db.json
 backend-dev*.log
 backend-fixed*.log
 backend-restart*.log
