@@ -1,26 +1,118 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, Plus, Search, Send, Trash2, WandSparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
+import {
+  Activity,
+  Bell,
+  BarChart3,
+  Boxes,
+  ChevronLeft,
+  Command,
+  Copy,
+  CreditCard,
+  Download,
+  FileArchive,
+  History,
+  LayoutDashboard,
+  Menu,
+  Moon,
+  Plus,
+  Search,
+  Send,
+  Settings,
+  Sparkles,
+  Trash2,
+  Upload,
+  WandSparkles,
+  Zap,
+} from 'lucide-react';
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import clsx from 'clsx';
 import Layout from '../components/Layout.jsx';
 import FileViewer from '../components/FileViewer.jsx';
 import PlanCard from '../components/PlanCard.jsx';
 import { apiRequest, downloadUrl } from '../services/api.js';
 import { useAuth } from '../services/auth.jsx';
 
+const promptSuggestions = [
+  'Create a Chrome extension that replaces all website images with red boxes.',
+  'Build an extension that blocks all YouTube Shorts.',
+  'Create a dark mode extension with a popup toggle.',
+  'Highlight all links on a page in yellow.',
+  'Show reading time for every article.',
+];
+
+const generationSteps = [
+  'Analyzing Prompt...',
+  'Generating Manifest...',
+  'Creating Scripts...',
+  'Validating Extension...',
+  'Packaging ZIP...',
+  'Ready For Download...',
+];
+
+const analyticsData = [
+  { day: 'Mon', generations: 3, downloads: 2 },
+  { day: 'Tue', generations: 5, downloads: 4 },
+  { day: 'Wed', generations: 2, downloads: 3 },
+  { day: 'Thu', generations: 7, downloads: 5 },
+  { day: 'Fri', generations: 4, downloads: 6 },
+  { day: 'Sat', generations: 8, downloads: 7 },
+  { day: 'Sun', generations: 6, downloads: 8 },
+];
+
+const navItems = [
+  ['Dashboard', LayoutDashboard],
+  ['New Extension', Plus],
+  ['My Extensions', Boxes],
+  ['History', History],
+  ['Analytics', BarChart3],
+  ['Billing', CreditCard],
+  ['Settings', Settings],
+];
+
 export default function Dashboard() {
-  const { token, subscription, setSubscription } = useAuth();
+  const { token, subscription, setSubscription, user } = useAuth();
   const [extensions, setExtensions] = useState([]);
   const [selectedId, setSelectedId] = useState('');
-  const [prompt, setPrompt] = useState('Create a Chrome extension that replaces all website images with red squares.');
+  const [activePage, setActivePage] = useState('Dashboard');
+  const [prompt, setPrompt] = useState('Create a Chrome extension that replaces all website images with red boxes.');
   const [editPrompt, setEditPrompt] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [progressStep, setProgressStep] = useState(0);
 
   const selected = useMemo(() => extensions.find(item => item._id === selectedId) || extensions[0], [extensions, selectedId]);
+  const totalVersions = extensions.reduce((sum, item) => sum + (item.versionHistory?.length || 1), 0);
+  const storageKb = Math.max(1, Math.round(JSON.stringify(extensions).length / 1024));
 
   useEffect(() => {
     loadExtensions();
   }, []);
+
+  useEffect(() => {
+    const handler = event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setCommandOpen(value => !value);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setProgressStep(0);
+      return undefined;
+    }
+    const interval = setInterval(() => {
+      setProgressStep(step => Math.min(step + 1, generationSteps.length - 1));
+    }, 650);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   async function loadExtensions(q = '') {
     const data = await apiRequest(`/api/extensions${q ? `?search=${encodeURIComponent(q)}` : ''}`, { token });
@@ -31,7 +123,7 @@ export default function Dashboard() {
   async function generate(event) {
     event.preventDefault();
     setLoading(true);
-    setError('');
+    const toastId = toast.loading('Generating extension with AI...');
     try {
       const extension = await apiRequest('/api/extensions/generate', {
         token,
@@ -40,8 +132,10 @@ export default function Dashboard() {
       });
       await loadExtensions();
       setSelectedId(extension._id);
+      setActivePage('History');
+      toast.success('Extension ZIP is ready', { id: toastId });
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message, { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -51,7 +145,7 @@ export default function Dashboard() {
     event.preventDefault();
     if (!selected) return;
     setLoading(true);
-    setError('');
+    const toastId = toast.loading('Applying edit request...');
     try {
       const extension = await apiRequest(`/api/extensions/${selected._id}/edit`, {
         token,
@@ -61,8 +155,9 @@ export default function Dashboard() {
       await loadExtensions();
       setSelectedId(extension._id);
       setEditPrompt('');
+      toast.success('New version created', { id: toastId });
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message, { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -71,6 +166,8 @@ export default function Dashboard() {
   async function removeExtension(id) {
     await apiRequest(`/api/extensions/${id}`, { token, method: 'DELETE' });
     await loadExtensions();
+    if (selectedId === id) setSelectedId('');
+    toast.success('Extension deleted');
   }
 
   async function choosePlan(plan) {
@@ -80,104 +177,495 @@ export default function Dashboard() {
       body: JSON.stringify({ plan }),
     });
     setSubscription(data);
+    toast.success(`Switched to ${plan}`);
   }
 
   return (
     <Layout>
-      <main className="mx-auto grid max-w-7xl gap-5 px-4 py-6 lg:grid-cols-[360px_1fr]">
-        <aside className="space-y-5">
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Plus size={18} />
-              <h1 className="font-black text-slate-950">New Extension</h1>
-            </div>
-            <form onSubmit={generate} className="space-y-3">
-              <textarea value={prompt} onChange={event => setPrompt(event.target.value)} rows={6} className="w-full resize-none rounded-lg border border-slate-200 p-3 text-sm" />
-              <button disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
-                <WandSparkles size={17} /> {loading ? 'Generating...' : 'Generate ZIP'}
+      <div className="min-h-screen bg-[#030712] text-[#F9FAFB]">
+        <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} setPrompt={setPrompt} />
+
+        <div className="flex">
+          <aside className={clsx('sticky top-0 hidden h-screen shrink-0 border-r border-[#1F2937] bg-[#030712]/95 p-4 transition-all lg:block', sidebarOpen ? 'w-72' : 'w-20')}>
+            <div className="flex items-center justify-between">
+              {sidebarOpen && (
+                <div>
+                  <p className="text-lg font-black">Extensio.ai</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00E599]">Factory OS</p>
+                </div>
+              )}
+              <button onClick={() => setSidebarOpen(value => !value)} className="rounded-lg border border-[#1F2937] p-2 text-[#9CA3AF] hover:text-[#00E599]">
+                {sidebarOpen ? <ChevronLeft size={18} /> : <Menu size={18} />}
               </button>
-            </form>
-            {error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</p>}
-          </section>
-
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <Search size={18} />
-              <h2 className="font-black">Search Extensions</h2>
             </div>
-            <div className="flex gap-2">
-              <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search history" className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              <button onClick={() => loadExtensions(search)} className="rounded-lg bg-slate-900 px-3 py-2 text-white"><Search size={16} /></button>
-            </div>
-          </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-4">
-            <h2 className="mb-3 font-black">My Extensions</h2>
-            <div className="space-y-2">
-              {extensions.map(item => (
-                <button key={item._id} onClick={() => setSelectedId(item._id)} className="w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-slate-900">{item.name}</span>
-                    <Trash2 onClick={(event) => { event.stopPropagation(); removeExtension(item._id); }} size={16} className="text-slate-400 hover:text-red-600" />
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-xs text-slate-500">{item.prompt}</p>
+            <nav className="mt-8 space-y-2">
+              {navItems.map(([label, Icon]) => (
+                <button key={label} onClick={() => setActivePage(label)} className={clsx('flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-bold transition', activePage === label ? 'bg-[#00E599]/10 text-[#00E599]' : 'text-[#9CA3AF] hover:bg-[#111827] hover:text-[#F9FAFB]')}>
+                  <Icon size={18} />
+                  {sidebarOpen && label}
                 </button>
               ))}
-              {!extensions.length && <p className="text-sm text-slate-500">No extensions yet.</p>}
-            </div>
-          </section>
-        </aside>
+            </nav>
 
-        <section className="space-y-5">
-          <div className="rounded-lg border border-slate-200 bg-white p-5">
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-              <div>
-                <p className="text-xs font-black uppercase tracking-wide text-emerald-600">Extension History</p>
-                <h2 className="mt-1 text-2xl font-black text-slate-950">{selected?.name || 'Generate your first extension'}</h2>
-                <p className="mt-1 max-w-2xl text-sm text-slate-500">{selected?.description}</p>
-              </div>
-              {selected?.zipUrl && (
-                <a href={downloadUrl(selected.zipUrl)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white">
-                  <Download size={17} /> Download Extension
-                </a>
-              )}
-            </div>
-
-            {selected && (
-              <form onSubmit={edit} className="mt-5 flex flex-col gap-2 sm:flex-row">
-                <input value={editPrompt} onChange={event => setEditPrompt(event.target.value)} placeholder="Edit request, e.g. Change button to blue" className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                <button disabled={loading || !editPrompt} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
-                  <Send size={16} /> Apply Edit
-                </button>
-              </form>
-            )}
-
-            {selected?.versionHistory?.length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {selected.versionHistory.map(version => (
-                  <span key={version.version} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                    v{version.version} {version.editRequest ? 'edit' : 'generated'}
-                  </span>
-                ))}
+            {sidebarOpen && (
+              <div className="absolute bottom-4 left-4 right-4 rounded-2xl border border-[#1F2937] bg-[#111827] p-4">
+                <div className="flex items-center gap-2 text-sm font-black text-[#00E599]">
+                  <Sparkles size={16} /> Prompt Library
+                </div>
+                <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">Use Ctrl+K for global search, templates, and shortcuts.</p>
               </div>
             )}
-          </div>
+          </aside>
 
-          <FileViewer extension={selected} />
+          <main className="min-w-0 flex-1">
+            <TopNav user={user} subscription={subscription} search={search} setSearch={setSearch} onSearch={() => { loadExtensions(search); setActivePage('My Extensions'); }} onCommand={() => setCommandOpen(true)} />
 
-          <section className="grid gap-3 md:grid-cols-3">
-            <PlanCard name="Free" price="$0" active={(subscription?.plan || 'free') === 'free'} onSelect={() => choosePlan('free')}>
-              3 extensions per day.
-            </PlanCard>
-            <PlanCard name="Pro" price="$19" active={subscription?.plan === 'pro'} onSelect={() => choosePlan('pro')}>
-              Unlimited generation.
-            </PlanCard>
-            <PlanCard name="Premium" price="$49" active={subscription?.plan === 'premium'} onSelect={() => choosePlan('premium')}>
-              API-call extensions enabled.
-            </PlanCard>
-          </section>
-        </section>
-      </main>
+            <AnimatePresence mode="wait">
+              <motion.div key={activePage} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.18 }} className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
+                <DashboardPage
+                  activePage={activePage}
+                  extensions={extensions}
+                  selected={selected}
+                  selectedId={selected?._id}
+                  setSelectedId={setSelectedId}
+                  removeExtension={removeExtension}
+                  prompt={prompt}
+                  setPrompt={setPrompt}
+                  generate={generate}
+                  loading={loading}
+                  progressStep={progressStep}
+                  editPrompt={editPrompt}
+                  setEditPrompt={setEditPrompt}
+                  edit={edit}
+                  subscription={subscription}
+                  choosePlan={choosePlan}
+                  storageKb={storageKb}
+                  setActivePage={setActivePage}
+                />
+              </motion.div>
+            </AnimatePresence>
+          </main>
+        </div>
+      </div>
     </Layout>
+  );
+}
+
+function DashboardPage({
+  activePage,
+  extensions,
+  selected,
+  selectedId,
+  setSelectedId,
+  removeExtension,
+  prompt,
+  setPrompt,
+  generate,
+  loading,
+  progressStep,
+  editPrompt,
+  setEditPrompt,
+  edit,
+  subscription,
+  choosePlan,
+  storageKb,
+  setActivePage,
+}) {
+  if (activePage === 'New Extension') {
+    return (
+      <PageShell eyebrow="New Extension" title="Build a Chrome extension from one prompt" subtitle="Describe exactly what you need. Extensio.ai generates Manifest V3 files, validates them, and packages the ZIP.">
+        <div className="grid gap-6 xl:grid-cols-[460px_1fr]">
+          <section className="space-y-6">
+            <PromptWorkspace prompt={prompt} setPrompt={setPrompt} generate={generate} loading={loading} />
+            <GenerationProgress loading={loading} progressStep={progressStep} />
+          </section>
+          <section className="min-w-0 space-y-6">
+            <SelectedExtension selected={selected} editPrompt={editPrompt} setEditPrompt={setEditPrompt} edit={edit} loading={loading} />
+            <FileViewer extension={selected} />
+          </section>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (activePage === 'My Extensions') {
+    return (
+      <PageShell eyebrow="My Extensions" title="Manage every generated extension" subtitle="Open, edit, duplicate, download, or delete your extension projects from this workspace.">
+        <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
+          <SearchAndHistory extensions={extensions} selectedId={selectedId} setSelectedId={setSelectedId} removeExtension={removeExtension} />
+          <section className="min-w-0 space-y-6">
+            <SelectedExtension selected={selected} editPrompt={editPrompt} setEditPrompt={setEditPrompt} edit={edit} loading={loading} />
+            <FileViewer extension={selected} />
+          </section>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (activePage === 'History') {
+    return (
+      <PageShell eyebrow="History" title="Version history and generated files" subtitle="Review the latest selected extension, apply edit requests, and inspect generated code before downloading.">
+        <div className="space-y-6">
+          <SelectedExtension selected={selected} editPrompt={editPrompt} setEditPrompt={setEditPrompt} edit={edit} loading={loading} />
+          <FileViewer extension={selected} />
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (activePage === 'Analytics') {
+    return (
+      <PageShell eyebrow="Analytics" title="Usage, downloads, and activity" subtitle="Track extension generation volume, downloads, and recent workspace events.">
+        <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+          <AnalyticsPanel />
+          <ActivityFeed extensions={extensions} />
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (activePage === 'Billing') {
+    return (
+      <PageShell eyebrow="Billing" title="Choose the right generation plan" subtitle="Switch between Free, Pro, and Premium plans based on how many extensions you want to ship.">
+        <div className="grid gap-4 md:grid-cols-3">
+          <PlanCard name="Free" price="$0" active={(subscription?.plan || 'free') === 'free'} onSelect={() => choosePlan('free')} features={['3 extensions/day', 'ZIP downloads', 'Prompt history']}>
+            Start experimenting with no-code extension generation.
+          </PlanCard>
+          <PlanCard name="Pro" price="$19" recommended active={subscription?.plan === 'pro'} onSelect={() => choosePlan('pro')} features={['Unlimited generations', 'Edit requests', 'Advanced history']}>
+            For builders shipping multiple extension ideas.
+          </PlanCard>
+          <PlanCard name="Premium" price="$49" active={subscription?.plan === 'premium'} onSelect={() => choosePlan('premium')} features={['API-call extensions', 'Team collaboration', 'Priority generation']}>
+            For teams building production-grade workflows.
+          </PlanCard>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (activePage === 'Settings') {
+    return (
+      <PageShell eyebrow="Settings" title="Workspace and security controls" subtitle="Manage profile preferences, API provider settings, theme controls, and team-ready configuration.">
+        <section className="grid gap-6 lg:grid-cols-3">
+          {[
+            ['Profile Settings', 'Manage account identity and workspace preferences.'],
+            ['API Key Management', 'Connect Groq, Gemini, or future AI providers securely.'],
+            ['Theme Settings', 'Dark and light appearance controls for your workspace.'],
+          ].map(([title, text]) => (
+            <motion.div key={title} whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
+              <Settings className="text-[#00E599]" size={20} />
+              <h3 className="mt-4 font-black">{title}</h3>
+              <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">{text}</p>
+            </motion.div>
+          ))}
+        </section>
+      </PageShell>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <HeroDashboard />
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Generated Extensions" value={extensions.length} icon={Boxes} />
+        <StatCard label="Downloads" value={extensions.length * 3} icon={Download} />
+        <StatCard label="Storage Used" value={`${storageKb} KB`} icon={FileArchive} />
+        <StatCard label="Current Plan" value={(subscription?.plan || 'free').toUpperCase()} icon={Zap} />
+      </section>
+      <div className="grid gap-6 xl:grid-cols-[1fr_0.8fr]">
+        <QuickActionCard setActivePage={setActivePage} />
+        <ActivityFeed extensions={extensions} />
+      </div>
+    </div>
+  );
+}
+
+function PageShell({ eyebrow, title, subtitle, children }) {
+  return (
+    <div className="space-y-6">
+      <section className="glass-panel rounded-3xl p-6 lg:p-8">
+        <p className="text-sm font-black uppercase tracking-[0.24em] text-[#00E599]">{eyebrow}</p>
+        <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-tight lg:text-5xl">{title}</h1>
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-[#9CA3AF] lg:text-base">{subtitle}</p>
+      </section>
+      {children}
+    </div>
+  );
+}
+
+function QuickActionCard({ setActivePage }) {
+  return (
+    <section className="glass-panel rounded-2xl p-5">
+      <SectionHeader eyebrow="Start here" title="Create, inspect, and ship from separate pages" />
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {[
+          ['New Extension', 'Open the prompt workspace and generate a new ZIP.', Plus],
+          ['My Extensions', 'Browse all saved projects and manage downloads.', Boxes],
+          ['History', 'Review the selected extension files and versions.', History],
+          ['Billing', 'Upgrade limits and unlock advanced generation.', CreditCard],
+        ].map(([title, text, Icon]) => (
+          <button key={title} onClick={() => setActivePage(title)} className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4 text-left transition hover:border-[#00E599]/50 hover:bg-[#00E599]/5">
+            <Icon size={20} className="text-[#00E599]" />
+            <p className="mt-3 font-black">{title}</p>
+            <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{text}</p>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TopNav({ user, subscription, search, setSearch, onSearch, onCommand }) {
+  return (
+    <header className="sticky top-0 z-30 border-b border-[#1F2937] bg-[#030712]/85 px-4 py-3 backdrop-blur-xl lg:px-8">
+      <div className="mx-auto flex max-w-7xl items-center gap-3">
+        <button onClick={onCommand} className="hidden items-center gap-2 rounded-xl border border-[#1F2937] bg-[#111827] px-3 py-2 text-sm font-bold text-[#9CA3AF] hover:text-[#F9FAFB] md:flex">
+          <Command size={16} /> Ctrl K
+        </button>
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#1F2937] bg-[#111827] px-3 py-2">
+          <Search size={16} className="text-[#9CA3AF]" />
+          <input value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => event.key === 'Enter' && onSearch()} placeholder="Search extensions, prompts, files..." className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#6B7280]" />
+        </div>
+        <button className="rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] hover:text-[#00E599]"><Bell size={18} /></button>
+        <button className="rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] hover:text-[#00E599]"><Moon size={18} /></button>
+        <span className="rounded-full bg-[#00E599]/10 px-3 py-2 text-xs font-black uppercase text-[#00E599]">{subscription?.plan || 'free'}</span>
+        <div className="grid h-10 w-10 place-items-center rounded-xl premium-gradient font-black text-[#030712]">{user?.name?.[0] || 'U'}</div>
+      </div>
+    </header>
+  );
+}
+
+function HeroDashboard() {
+  return (
+    <motion.section initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="glass-panel overflow-hidden rounded-3xl p-6 lg:p-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase tracking-[0.24em] text-[#00E599]">AI Extension Factory</p>
+          <h1 className="mt-3 max-w-3xl text-4xl font-black tracking-tight lg:text-5xl">Generate, validate, and ship Chrome extensions from a prompt.</h1>
+          <p className="mt-4 max-w-2xl text-[#9CA3AF]">A premium workspace for no-code extension creation, version history, secure packaging, and instant ZIP delivery.</p>
+        </div>
+        <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4 font-mono text-sm text-[#9CA3AF]">
+          <p>&gt; Build Chrome Extensions With AI</p>
+          <p className="mt-2 text-[#00E599]">manifest.json + content.js + popup.html + ZIP</p>
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
+function StatCard({ label, value, icon: Icon }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
+      <div className="flex items-center justify-between">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#00E599]/10 text-[#00E599]"><Icon size={20} /></span>
+        <span className="rounded-full bg-[#111827] px-3 py-1 text-xs font-bold text-[#9CA3AF]">Live</span>
+      </div>
+      <p className="mt-5 text-3xl font-black">{value}</p>
+      <p className="mt-1 text-sm text-[#9CA3AF]">{label}</p>
+    </motion.div>
+  );
+}
+
+function PromptWorkspace({ prompt, setPrompt, generate, loading }) {
+  return (
+    <section className="glass-panel rounded-2xl p-5">
+      <div className="flex items-center gap-2">
+        <WandSparkles size={20} className="text-[#00E599]" />
+        <h2 className="font-black">AI Prompt Workspace</h2>
+      </div>
+      <form onSubmit={generate} className="mt-4 space-y-4">
+        <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4">
+          <textarea value={prompt} onChange={event => setPrompt(event.target.value)} rows={7} className="w-full resize-none bg-transparent text-sm leading-7 outline-none placeholder:text-[#6B7280]" />
+          <div className="mt-3 flex items-center justify-between border-t border-[#1F2937] pt-3 text-xs text-[#9CA3AF]">
+            <span>{prompt.length}/4000 characters</span>
+            <span>Manifest V3 ready</span>
+          </div>
+        </div>
+        <button disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl premium-gradient px-4 py-3 font-black text-[#030712] disabled:opacity-60">
+          <Sparkles size={18} /> {loading ? 'Generating...' : 'Generate ZIP'}
+        </button>
+      </form>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {promptSuggestions.map(suggestion => (
+          <button key={suggestion} onClick={() => setPrompt(suggestion)} className="rounded-full border border-[#1F2937] px-3 py-2 text-xs font-semibold text-[#9CA3AF] hover:border-[#00E599]/50 hover:text-[#F9FAFB]">
+            {suggestion}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function GenerationProgress({ loading, progressStep }) {
+  return (
+    <AnimatePresence>
+      {loading && (
+        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="glass-panel rounded-2xl p-5">
+          <div className="flex items-center gap-3">
+            <span className="h-3 w-3 animate-pulse rounded-full bg-[#00E599]" />
+            <h3 className="font-black">AI Thinking</h3>
+          </div>
+          <div className="mt-4 space-y-3">
+            {generationSteps.map((step, index) => (
+              <div key={step} className="flex items-center gap-3 text-sm">
+                <span className={clsx('h-2 w-2 rounded-full', index <= progressStep ? 'bg-[#00E599]' : 'bg-[#374151]')} />
+                <span className={index <= progressStep ? 'text-[#F9FAFB]' : 'text-[#6B7280]'}>{step}</span>
+              </div>
+            ))}
+          </div>
+        </motion.section>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function SearchAndHistory({ extensions, selectedId, setSelectedId, removeExtension }) {
+  return (
+    <section id="my-extensions" className="glass-panel rounded-2xl p-5">
+      <SectionHeader eyebrow="History" title="My Extensions" />
+      <div className="mt-4 space-y-3">
+        {extensions.map(item => (
+          <motion.button key={item._id} whileHover={{ scale: 1.01 }} onClick={() => setSelectedId(item._id)} className={clsx('w-full rounded-2xl border p-4 text-left transition', selectedId === item._id ? 'border-[#00E599] bg-[#00E599]/10' : 'border-[#1F2937] bg-[#030712] hover:border-[#00E599]/40')}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-black text-[#F9FAFB]">{item.name}</p>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#9CA3AF]">{item.prompt}</p>
+              </div>
+              <Trash2 onClick={(event) => { event.stopPropagation(); removeExtension(item._id); }} size={17} className="text-[#6B7280] hover:text-red-400" />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-[#9CA3AF]">
+              <span className="rounded-full bg-[#111827] px-2 py-1">v{item.versionHistory?.length || 1}</span>
+              <span className="rounded-full bg-[#111827] px-2 py-1">Download</span>
+              <span className="rounded-full bg-[#111827] px-2 py-1">Duplicate</span>
+            </div>
+          </motion.button>
+        ))}
+        {!extensions.length && <EmptyState />}
+      </div>
+    </section>
+  );
+}
+
+function SelectedExtension({ selected, editPrompt, setEditPrompt, edit, loading }) {
+  return (
+    <section id="history" className="glass-panel rounded-2xl p-5">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00E599]">Extension History</p>
+          <h2 className="mt-2 text-3xl font-black">{selected?.name || 'Generate your first extension'}</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#9CA3AF]">{selected?.description || 'Your generated extension details, files, versions, and download actions will appear here.'}</p>
+        </div>
+        {selected?.zipUrl && (
+          <a href={downloadUrl(selected.zipUrl)} className="inline-flex items-center justify-center gap-2 rounded-xl premium-gradient px-5 py-3 font-black text-[#030712]">
+            <Download size={18} /> Download Extension
+          </a>
+        )}
+      </div>
+
+      {selected && (
+        <form onSubmit={edit} className="mt-5 flex flex-col gap-3 lg:flex-row">
+          <input value={editPrompt} onChange={event => setEditPrompt(event.target.value)} placeholder="Edit request, e.g. change red boxes to blue circles" className="min-w-0 flex-1 rounded-xl border border-[#1F2937] bg-[#030712] px-4 py-3 text-sm outline-none placeholder:text-[#6B7280] focus:border-[#00E599]/60" />
+          <button disabled={loading || !editPrompt} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#F9FAFB] px-5 py-3 font-black text-[#030712] disabled:opacity-50">
+            <Send size={17} /> Apply Edit
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function AnalyticsPanel() {
+  return (
+    <section className="glass-panel rounded-2xl p-5">
+      <SectionHeader eyebrow="Analytics" title="Usage statistics" />
+      <div className="mt-5 h-72">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={analyticsData}>
+            <defs>
+              <linearGradient id="gen" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#00E599" stopOpacity={0.5} />
+                <stop offset="95%" stopColor="#00E599" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" />
+            <XAxis dataKey="day" stroke="#9CA3AF" />
+            <YAxis stroke="#9CA3AF" />
+            <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1F2937', color: '#F9FAFB' }} />
+            <Area type="monotone" dataKey="generations" stroke="#00E599" fill="url(#gen)" strokeWidth={3} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  );
+}
+
+function ActivityFeed({ extensions }) {
+  return (
+    <section className="glass-panel rounded-2xl p-5">
+      <SectionHeader eyebrow="Activity" title="Recent activity" />
+      <div className="mt-5 space-y-3">
+        {(extensions.slice(0, 5).length ? extensions.slice(0, 5) : [{ name: 'No activity yet', prompt: 'Generate an extension to start your feed.' }]).map((item, index) => (
+          <div key={`${item.name}-${index}`} className="flex gap-3 rounded-xl border border-[#1F2937] bg-[#030712] p-3">
+            <Activity size={18} className="mt-1 text-[#00E599]" />
+            <div>
+              <p className="text-sm font-black">{item.name}</p>
+              <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{item.prompt}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CommandPalette({ open, onClose, setPrompt }) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+          <motion.div initial={{ y: -20, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: -20, scale: 0.98 }} className="mx-auto mt-20 max-w-2xl rounded-2xl border border-[#1F2937] bg-[#030712] p-4 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center gap-3 border-b border-[#1F2937] pb-3">
+              <Command size={18} className="text-[#00E599]" />
+              <input autoFocus placeholder="Search commands, templates, shortcuts..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#6B7280]" />
+            </div>
+            <div className="mt-3 space-y-2">
+              {promptSuggestions.map(suggestion => (
+                <button key={suggestion} onClick={() => { setPrompt(suggestion); onClose(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
+                  <Sparkles size={16} className="text-[#00E599]" /> {suggestion}
+                </button>
+              ))}
+              <button className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
+                <Upload size={16} className="text-[#00E599]" /> Import existing extension ZIP
+              </button>
+              <button className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
+                <Copy size={16} className="text-[#00E599]" /> Export project JSON
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function SectionHeader({ eyebrow, title }) {
+  return (
+    <div>
+      <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00E599]">{eyebrow}</p>
+      <h2 className="mt-1 text-xl font-black text-[#F9FAFB]">{title}</h2>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="rounded-2xl border border-dashed border-[#1F2937] bg-[#030712] p-6 text-center">
+      <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#00E599]/10 text-[#00E599]">
+        <Boxes size={24} />
+      </div>
+      <h3 className="mt-4 font-black">No extensions generated yet</h3>
+      <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">Use the prompt workspace to create your first downloadable Manifest V3 extension.</p>
+    </div>
   );
 }

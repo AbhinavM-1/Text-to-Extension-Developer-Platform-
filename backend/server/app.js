@@ -17,10 +17,27 @@ const backendRoot = path.resolve(__dirname, '..');
 
 export function createApp() {
   const app = express();
-  const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+  const allowedOrigins = new Set([
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    ...(process.env.CLIENT_ORIGIN || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean),
+  ]);
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-  app.use(cors({ origin: clientOrigin, credentials: true }));
+  app.use(cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS blocked origin: ${origin}`));
+    },
+    credentials: true,
+  }));
   app.use(express.json({ limit: '1mb' }));
   app.use(morgan('dev'));
   app.use(rateLimit({

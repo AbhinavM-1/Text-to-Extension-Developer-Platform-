@@ -5,6 +5,7 @@ import Register from './pages/Register.jsx';
 import ForgotPassword from './pages/ForgotPassword.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Admin from './pages/Admin.jsx';
+import { Toaster } from 'react-hot-toast';
 
 function ProtectedRoute({ children }) {
   const { token } = useAuth();
@@ -14,6 +15,16 @@ function ProtectedRoute({ children }) {
 export default function App() {
   return (
     <AuthProvider>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            background: '#111827',
+            color: '#F9FAFB',
+            border: '1px solid #1F2937',
+          },
+        }}
+      />
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
