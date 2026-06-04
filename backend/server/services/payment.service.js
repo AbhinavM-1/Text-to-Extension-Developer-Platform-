@@ -1,0 +1,58 @@
+import crypto from 'crypto';
+import Razorpay from 'razorpay';
+
+let razorpayClient;
+
+function getRazorpayClient() {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!keyId || !keySecret) {
+    const error = new Error('Razorpay is not configured. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to backend/.env.');
+    error.status = 503;
+    throw error;
+  }
+
+  if (!razorpayClient) {
+    razorpayClient = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    });
+  }
+
+  return razorpayClient;
+}
+
+export async function createRazorpayOrder({ amount, currency = 'INR', receipt, notes = {} }) {
+  return getRazorpayClient().orders.create({
+    amount: amount * 100,
+    currency,
+    receipt,
+    notes,
+  });
+}
+
+export function getRazorpayKeyId() {
+  if (!process.env.RAZORPAY_KEY_ID) {
+    const error = new Error('Razorpay key id is missing. Add RAZORPAY_KEY_ID to backend/.env.');
+    error.status = 503;
+    throw error;
+  }
+
+  return process.env.RAZORPAY_KEY_ID;
+}
+
+export function verifyRazorpaySignature({ orderId, paymentId, signature }) {
+  if (!process.env.RAZORPAY_KEY_SECRET) {
+    const error = new Error('Razorpay key secret is missing. Add RAZORPAY_KEY_SECRET to backend/.env.');
+    error.status = 503;
+    throw error;
+  }
+
+  const expectedSignature = crypto
+    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+    .update(`${orderId}|${paymentId}`)
+    .digest('hex');
+
+  return expectedSignature === signature;
+}
