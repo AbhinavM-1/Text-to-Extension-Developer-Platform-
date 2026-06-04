@@ -1,4 +1,4 @@
-import { createPasswordReset, loginUser, registerUser } from '../services/auth.service.js';
+import { buildOAuthAuthorizationUrl, createPasswordReset, loginUser, loginWithOAuth, registerUser } from '../services/auth.service.js';
 import { Subscription } from '../models/Subscription.js';
 
 export async function register(req, res, next) {
@@ -32,5 +32,35 @@ export async function forgotPassword(req, res, next) {
     });
   } catch (error) {
     next(error);
+  }
+}
+
+export function startOAuth(req, res, next) {
+  try {
+    res.redirect(buildOAuthAuthorizationUrl(req.params.provider));
+  } catch (error) {
+    const message = encodeURIComponent(error.message || 'OAuth provider is not ready');
+    res.redirect(`${process.env.CLIENT_ORIGIN || 'http://localhost:5173'}/login?oauthError=${message}`);
+  }
+}
+
+export async function completeOAuth(req, res, next) {
+  try {
+    const { code, state } = req.query;
+    if (!code || !state) {
+      return res.redirect(`${process.env.CLIENT_ORIGIN || 'http://localhost:5173'}/login?oauthError=OAuth%20login%20was%20not%20completed`);
+    }
+
+    const result = await loginWithOAuth({
+      providerName: req.params.provider,
+      code,
+      state,
+    });
+
+    const params = new URLSearchParams({ token: result.token });
+    res.redirect(`${process.env.CLIENT_ORIGIN || 'http://localhost:5173'}/login?${params.toString()}`);
+  } catch (error) {
+    const message = encodeURIComponent(error.message || 'OAuth login failed');
+    res.redirect(`${process.env.CLIENT_ORIGIN || 'http://localhost:5173'}/login?oauthError=${message}`);
   }
 }
