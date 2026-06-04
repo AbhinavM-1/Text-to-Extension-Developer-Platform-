@@ -25,7 +25,7 @@ export default function Register() {
   }
 
   return (
-    <AuthShell title="Create account" subtitle="Start with the Free plan and three generations per day.">
+    <AuthShell title="Create account" subtitle="Start with the Free plan and five extension generations per day.">
       <form onSubmit={handleSubmit} className="space-y-4">
         <input name="name" required placeholder="Name" className="w-full rounded-xl border border-[#1F2937] bg-[#111827] px-4 py-3 text-[#F9FAFB] outline-none placeholder:text-[#6B7280] focus:border-[#00E599]/60" />
         <input name="email" type="email" required placeholder="Email" className="w-full rounded-xl border border-[#1F2937] bg-[#111827] px-4 py-3 text-[#F9FAFB] outline-none placeholder:text-[#6B7280] focus:border-[#00E599]/60" />

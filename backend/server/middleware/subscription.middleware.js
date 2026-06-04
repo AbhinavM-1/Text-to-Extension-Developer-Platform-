@@ -1,5 +1,7 @@
 import { Subscription } from '../models/Subscription.js';
 
+export const FREE_DAILY_GENERATION_LIMIT = 5;
+
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -14,8 +16,8 @@ export async function enforceGenerationQuota(req, res, next) {
     req.user.generationUsage = { date: key, count: 0 };
   }
 
-  if (req.user.generationUsage.count >= 3) {
-    return res.status(402).json({ message: 'Free plan limit reached: 3 extensions per day' });
+  if (req.user.generationUsage.count >= FREE_DAILY_GENERATION_LIMIT) {
+    return res.status(402).json({ message: `Free plan limit reached: ${FREE_DAILY_GENERATION_LIMIT} extensions per day` });
   }
 
   req.user.generationUsage.count += 1;
