@@ -13,13 +13,17 @@ import {
   Download,
   FileArchive,
   History,
+  Landmark,
   LayoutDashboard,
   Menu,
   Moon,
   Plus,
+  Receipt,
   Search,
   Send,
   Settings,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
   Trash2,
   Upload,
@@ -30,7 +34,6 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import clsx from 'clsx';
 import Layout from '../components/Layout.jsx';
 import FileViewer from '../components/FileViewer.jsx';
-import PlanCard from '../components/PlanCard.jsx';
 import { apiRequest, downloadUrl } from '../services/api.js';
 import { useAuth } from '../services/auth.jsx';
 
@@ -85,7 +88,6 @@ export default function Dashboard() {
   const [progressStep, setProgressStep] = useState(0);
 
   const selected = useMemo(() => extensions.find(item => item._id === selectedId) || extensions[0], [extensions, selectedId]);
-  const totalVersions = extensions.reduce((sum, item) => sum + (item.versionHistory?.length || 1), 0);
   const storageKb = Math.max(1, Math.round(JSON.stringify(extensions).length / 1024));
 
   useEffect(() => {
@@ -170,14 +172,50 @@ export default function Dashboard() {
     toast.success('Extension deleted');
   }
 
-  async function choosePlan(plan) {
-    const data = await apiRequest('/api/subscriptions/me', {
+  async function choosePlan(plan, billingCycle = 'monthly', paymentMethod = 'upi') {
+    if (plan === 'free') {
+      const data = await apiRequest('/api/subscriptions/checkout', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ plan }),
+      });
+      setSubscription(data.subscription);
+      toast.success('Switched to Free plan');
+      return;
+    }
+
+    await loadRazorpayCheckout();
+
+    const orderData = await apiRequest('/api/subscriptions/create-order', {
       token,
-      method: 'PATCH',
-      body: JSON.stringify({ plan }),
+      method: 'POST',
+      body: JSON.stringify({ plan, billingCycle, paymentMethod }),
     });
-    setSubscription(data);
-    toast.success(`Switched to ${plan}`);
+
+    const paymentResponse = await openRazorpayCheckout({
+      keyId: orderData.keyId,
+      order: orderData.order,
+      plan,
+      billingCycle,
+      paymentMethod,
+      user: orderData.user,
+    });
+
+    const verified = await apiRequest('/api/subscriptions/verify-payment', {
+      token,
+      method: 'POST',
+      body: JSON.stringify({
+        plan,
+        billingCycle,
+        paymentMethod,
+        razorpayOrderId: paymentResponse.razorpay_order_id,
+        razorpayPaymentId: paymentResponse.razorpay_payment_id,
+        razorpaySignature: paymentResponse.razorpay_signature,
+      }),
+    });
+
+    setSubscription(verified.subscription);
+    toast.success(`Payment verified: ${verified.receipt.reference}`);
   }
 
   return (
@@ -327,18 +365,8 @@ function DashboardPage({
 
   if (activePage === 'Billing') {
     return (
-      <PageShell eyebrow="Billing" title="Choose the right generation plan" subtitle="Switch between Free, Pro, and Premium plans based on how many extensions you want to ship.">
-        <div className="grid gap-4 md:grid-cols-3">
-          <PlanCard name="Free" price="$0" active={(subscription?.plan || 'free') === 'free'} onSelect={() => choosePlan('free')} features={['3 extensions/day', 'ZIP downloads', 'Prompt history']}>
-            Start experimenting with no-code extension generation.
-          </PlanCard>
-          <PlanCard name="Pro" price="$19" recommended active={subscription?.plan === 'pro'} onSelect={() => choosePlan('pro')} features={['Unlimited generations', 'Edit requests', 'Advanced history']}>
-            For builders shipping multiple extension ideas.
-          </PlanCard>
-          <PlanCard name="Premium" price="$49" active={subscription?.plan === 'premium'} onSelect={() => choosePlan('premium')} features={['API-call extensions', 'Team collaboration', 'Priority generation']}>
-            For teams building production-grade workflows.
-          </PlanCard>
-        </div>
+      <PageShell eyebrow="Billing" title="Payment dashboard and subscription plans" subtitle="Free users get 5 extension generations per day. Upgrade with UPI, card, or netbanking when you need production-scale usage.">
+        <BillingBoard subscription={subscription} choosePlan={choosePlan} />
       </PageShell>
     );
   }
@@ -412,6 +440,255 @@ function QuickActionCard({ setActivePage }) {
         ))}
       </div>
     </section>
+  );
+}
+
+const billingPlans = {
+  free: {
+    name: 'Free',
+    price: { monthly: 0, yearly: 0 },
+    badge: 'Starter',
+    description: 'Best for testing ideas and classroom demos.',
+    features: ['5 extensions per day', 'ZIP downloads', 'Prompt history', 'Manifest V3 validation'],
+  },
+  pro: {
+    name: 'Pro',
+    price: { monthly: 799, yearly: 7990 },
+    badge: 'Recommended',
+    description: 'For creators shipping extension ideas regularly.',
+    features: ['Unlimited generations', 'Edit request system', 'Version history', 'Priority ZIP packaging'],
+  },
+  premium: {
+    name: 'Premium',
+    price: { monthly: 1999, yearly: 19990 },
+    badge: 'Teams',
+    description: 'For production builds, teams, and API-call extensions.',
+    features: ['API-call extensions', 'Team collaboration', 'Admin controls', 'Priority support'],
+  },
+};
+
+const paymentMethods = [
+  { id: 'upi', label: 'UPI', icon: Smartphone, helper: 'Pay with any UPI app' },
+  { id: 'card', label: 'Card', icon: CreditCard, helper: 'Visa, Mastercard, RuPay' },
+  { id: 'netbanking', label: 'Netbanking', icon: Landmark, helper: 'Major Indian banks' },
+];
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Unable to load Razorpay Checkout. Check your internet connection.'));
+    document.body.appendChild(script);
+  });
+}
+
+function openRazorpayCheckout({ keyId, order, plan, billingCycle, paymentMethod, user }) {
+  return new Promise((resolve, reject) => {
+    const method = {
+      upi: paymentMethod === 'upi',
+      card: paymentMethod === 'card',
+      netbanking: paymentMethod === 'netbanking',
+      wallet: false,
+      emi: false,
+      paylater: false,
+    };
+
+    const checkout = new window.Razorpay({
+      key: keyId,
+      amount: order.amount,
+      currency: order.currency,
+      name: 'Extensio.ai',
+      description: `${billingPlans[plan].name} ${billingCycle} subscription`,
+      order_id: order.id,
+      method,
+      prefill: {
+        name: user?.name || '',
+        email: user?.email || '',
+      },
+      notes: {
+        plan,
+        billingCycle,
+        paymentMethod,
+      },
+      theme: {
+        color: '#00E599',
+      },
+      handler: resolve,
+      modal: {
+        ondismiss: () => reject(new Error('Payment cancelled before completion')),
+      },
+    });
+
+    checkout.on('payment.failed', response => {
+      reject(new Error(response?.error?.description || 'Payment failed'));
+    });
+
+    checkout.open();
+  });
+}
+
+function BillingBoard({ subscription, choosePlan }) {
+  const [selectedPlan, setSelectedPlan] = useState(subscription?.plan === 'premium' ? 'premium' : subscription?.plan === 'pro' ? 'pro' : 'pro');
+  const [billingCycle, setBillingCycle] = useState(subscription?.billingCycle || 'monthly');
+  const [paymentMethod, setPaymentMethod] = useState(subscription?.paymentMethod === 'card' || subscription?.paymentMethod === 'netbanking' ? subscription.paymentMethod : 'upi');
+  const [processing, setProcessing] = useState(false);
+  const currentPlan = subscription?.plan || 'free';
+  const plan = billingPlans[selectedPlan];
+  const amount = plan.price[billingCycle];
+  const yearlySavings = selectedPlan === 'free' ? 0 : (plan.price.monthly * 12) - plan.price.yearly;
+
+  async function handleCheckout(event) {
+    event.preventDefault();
+    setProcessing(true);
+    try {
+      await choosePlan(selectedPlan, billingCycle, selectedPlan === 'free' ? 'free' : paymentMethod);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+      <section className="space-y-4">
+        <div className="glass-panel rounded-2xl p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <SectionHeader eyebrow="Plans" title="Choose your workspace limit" />
+              <p className="mt-2 text-sm text-[#9CA3AF]">Pricing is INR-first and tuned for student builders, hackathons, and early-stage creators.</p>
+            </div>
+            <div className="inline-flex rounded-2xl border border-[#1F2937] bg-[#030712] p-1">
+              {['monthly', 'yearly'].map(cycle => (
+                <button key={cycle} onClick={() => setBillingCycle(cycle)} className={clsx('rounded-xl px-4 py-2 text-sm font-black capitalize transition', billingCycle === cycle ? 'premium-gradient text-[#030712]' : 'text-[#9CA3AF] hover:text-[#F9FAFB]')}>
+                  {cycle}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          {Object.entries(billingPlans).map(([key, item]) => {
+            const active = currentPlan === key;
+            const selected = selectedPlan === key;
+            return (
+              <motion.button
+                key={key}
+                type="button"
+                whileHover={{ y: -5 }}
+                onClick={() => setSelectedPlan(key)}
+                className={clsx('relative rounded-2xl border p-5 text-left transition', selected ? 'border-[#00E599] bg-[#00E599]/10 shadow-2xl shadow-emerald-500/10' : 'border-[#1F2937] bg-[#111827]/80 hover:border-[#00E599]/50')}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xl font-black">{item.name}</p>
+                    <p className="mt-2 min-h-12 text-sm leading-6 text-[#9CA3AF]">{item.description}</p>
+                  </div>
+                  <span className={clsx('rounded-full px-3 py-1 text-[11px] font-black uppercase', item.badge === 'Recommended' ? 'premium-gradient text-[#030712]' : 'bg-[#030712] text-[#00E599]')}>
+                    {active ? 'Current' : item.badge}
+                  </span>
+                </div>
+                <p className="mt-5 text-3xl font-black">₹{item.price[billingCycle].toLocaleString('en-IN')}<span className="text-sm text-[#9CA3AF]">/{billingCycle === 'yearly' ? 'yr' : 'mo'}</span></p>
+                <div className="mt-5 space-y-2">
+                  {item.features.map(feature => (
+                    <p key={feature} className="flex items-center gap-2 text-sm text-[#D1D5DB]">
+                      <ShieldCheck size={15} className="text-[#00E599]" />
+                      {feature}
+                    </p>
+                  ))}
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="glass-panel rounded-2xl p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <SectionHeader eyebrow="Checkout" title="Secure payment" />
+            <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">Real Razorpay Checkout with UPI, card, and netbanking. Payment is verified on the server before the plan is activated.</p>
+          </div>
+          <span className="rounded-2xl bg-[#00E599]/10 p-3 text-[#00E599]">
+            <Receipt size={22} />
+          </span>
+        </div>
+
+        <form onSubmit={handleCheckout} className="mt-5 space-y-5">
+          {selectedPlan !== 'free' && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {paymentMethods.map(method => {
+                  const Icon = method.icon;
+                  return (
+                    <button key={method.id} type="button" onClick={() => setPaymentMethod(method.id)} className={clsx('rounded-2xl border p-4 text-left transition', paymentMethod === method.id ? 'border-[#00E599] bg-[#00E599]/10' : 'border-[#1F2937] bg-[#030712] hover:border-[#00E599]/50')}>
+                      <Icon size={20} className="text-[#00E599]" />
+                      <p className="mt-3 font-black">{method.label}</p>
+                      <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{method.helper}</p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <PaymentGatewayNotice paymentMethod={paymentMethod} />
+            </>
+          )}
+
+          <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-[#9CA3AF]">{plan.name} plan</span>
+              <span className="font-black">₹{amount.toLocaleString('en-IN')}</span>
+            </div>
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="text-[#9CA3AF]">Billing cycle</span>
+              <span className="font-black capitalize">{billingCycle}</span>
+            </div>
+            {yearlySavings > 0 && (
+              <div className="mt-3 flex items-center justify-between text-sm text-[#00E599]">
+                <span>Yearly savings</span>
+                <span className="font-black">₹{yearlySavings.toLocaleString('en-IN')}</span>
+              </div>
+            )}
+            <div className="mt-4 border-t border-[#1F2937] pt-4">
+              <div className="flex items-center justify-between">
+                <span className="font-black">Total due today</span>
+                <span className="text-2xl font-black">₹{amount.toLocaleString('en-IN')}</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">Click checkout to open Razorpay. UPI IDs, card numbers, and bank credentials are collected securely by Razorpay, not stored in Extensio.ai.</p>
+            </div>
+          </div>
+
+          <button disabled={processing || currentPlan === selectedPlan} className="flex w-full items-center justify-center gap-2 rounded-xl premium-gradient px-4 py-3 font-black text-[#030712] disabled:opacity-50">
+            <ShieldCheck size={18} />
+            {currentPlan === selectedPlan ? 'Current plan active' : processing ? 'Processing payment...' : selectedPlan === 'free' ? 'Switch to Free' : `Pay ₹${amount.toLocaleString('en-IN')} securely`}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function PaymentGatewayNotice({ paymentMethod }) {
+  const copy = {
+    upi: ['UPI Checkout', 'Razorpay will open a UPI checkout where the customer can scan, approve, or enter their UPI ID securely.'],
+    card: ['Card Checkout', 'Razorpay will collect card number, expiry, CVV, OTP/3DS, and network authentication securely.'],
+    netbanking: ['Netbanking Checkout', 'Razorpay will redirect the customer to their bank login and return only the verified payment result.'],
+  };
+  const [title, text] = copy[paymentMethod] || copy.upi;
+
+  return (
+    <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4">
+      <div className="flex items-start gap-3">
+        <ShieldCheck size={20} className="mt-1 shrink-0 text-[#00E599]" />
+        <div>
+          <p className="font-black">{title}</p>
+          <p className="mt-1 text-sm leading-6 text-[#9CA3AF]">{text}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
