@@ -22,6 +22,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('extensio_token', data.token);
     setToken(data.token);
     setUser(data.user);
+    if (data.subscription !== undefined) setSubscription(data.subscription);
   }
 
   async function login(email, password) {
@@ -38,6 +39,11 @@ export function AuthProvider({ children }) {
     }));
   }
 
+  async function acceptOAuthToken(oauthToken) {
+    const data = await apiRequest('/api/auth/me', { token: oauthToken });
+    saveSession({ token: oauthToken, user: data.user, subscription: data.subscription });
+  }
+
   function logout() {
     localStorage.removeItem('extensio_token');
     setToken(null);
@@ -52,6 +58,7 @@ export function AuthProvider({ children }) {
     setSubscription,
     login,
     register,
+    acceptOAuthToken,
     logout,
   }), [token, user, subscription]);
 
