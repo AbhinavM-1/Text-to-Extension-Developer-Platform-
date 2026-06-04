@@ -2,7 +2,7 @@ const dangerousPatterns = [
   { pattern: /\beval\s*\(/i, severity: 'critical', message: 'Uses eval, which can execute arbitrary code.' },
   { pattern: /\bnew\s+Function\s*\(|\bFunction\s*\(/, severity: 'critical', message: 'Uses Function constructor for dynamic code execution.' },
   { pattern: /document\.write\s*\(/i, severity: 'warning', message: 'Uses document.write, which can create injection risks.' },
-  { pattern: /chrome\.tabs\.executeScript/i, severity: 'warning', message: 'Uses deprecated script execution API.' },
+  { pattern: /chrome\.tabs\.executeScript/i, severity: 'critical', message: 'Uses deprecated script execution API that is not valid for Manifest V3.' },
   { pattern: /<script[^>]+src=["']https?:\/\//i, severity: 'critical', message: 'Loads remote script code, disallowed for Chrome extensions.' },
   { pattern: /\bpassword\b|\bcredential\b|\bkeylogger\b/i, severity: 'warning', message: 'Contains sensitive credential-related terms; review carefully.' },
 ];

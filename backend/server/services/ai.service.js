@@ -57,9 +57,16 @@ function parseJsonObject(content = '') {
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
     if (start >= 0 && end > start) {
-      return JSON.parse(cleaned.slice(start, end + 1));
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch (error) {
+        error.status = 422;
+        throw error;
+      }
     }
-    throw new Error('Groq did not return valid extension JSON.');
+    const error = new Error('Groq did not return valid extension JSON.');
+    error.status = 422;
+    throw error;
   }
 }
 
@@ -82,7 +89,10 @@ export function localTemplatePayload(userPrompt = '') {
   if (prompt.includes('dark mode') || prompt.includes('darkmode')) return darkModePayload();
   if (prompt.includes('highlight') && prompt.includes('link')) return linkHighlighterPayload(userPrompt);
   if (prompt.includes('read') && prompt.includes('time')) return readingTimePayload();
-  if (prompt.includes('block') && (prompt.includes('ad') || prompt.includes('popup'))) return adBlockerPayload();
+  if (/\b(block\w*|remove\w*|hid\w*|clean\w*|stop\w*)\b/i.test(prompt)
+    && /\b(ad|ads|advertisement|advertisements|sponsor|sponsored|promoted|popup|pop-up)\b/i.test(prompt)) {
+    return adBlockerPayload();
+  }
   if (prompt.includes('image') || prompt.includes('img') || prompt.includes('photo')) return imageSquarePayload(userPrompt);
   return genericHelperPayload(userPrompt);
 }
@@ -148,29 +158,287 @@ function extractRequestedShape(prompt) {
 }
 
 function adBlockerPayload() {
-  return extensionPayload({
-    name: 'Ad And Popup Cleaner',
-    description: 'Hides common ads, popups, overlays, and sponsored blocks on webpages.',
-    contentJs: `function cleanPage(){
-  const selectors = [
-    '[id*="ad" i]', '[class*="ad" i]', '[aria-label*="ad" i]',
-    '[id*="sponsor" i]', '[class*="sponsor" i]',
-    '[id*="popup" i]', '[class*="popup" i]',
-    '[id*="modal" i]', '[class*="modal" i]',
-    'iframe[src*="ads" i]', 'iframe[src*="doubleclick" i]'
-  ];
-  document.querySelectorAll(selectors.join(',')).forEach((element) => {
-    const rect = element.getBoundingClientRect();
-    if (rect.width > 80 || rect.height > 50) element.remove();
-  });
-  document.documentElement.style.overflow = 'auto';
-  document.body.style.overflow = 'auto';
+  const name = 'YouTube Ad Cleaner';
+  const description = 'Safely hides YouTube sponsored cards, promoted shelves, companion ads, and visible ad overlays without changing normal video playback.';
+  const contentJs = `const STORAGE_KEY = 'youtubeAdCleanupEnabled';
+const CLEANED_ATTR = 'data-extensio-ad-cleaned';
+
+const AD_UI_SELECTORS = [
+  '.ytp-ad-overlay-container',
+  '.ytp-ad-player-overlay',
+  '#player-ads',
+  'ytd-display-ad-renderer',
+  'ytd-promoted-sparkles-web-renderer',
+  'ytd-promoted-video-renderer',
+  'ytd-ad-slot-renderer',
+  'ytd-companion-slot-renderer',
+  'ytd-action-companion-ad-renderer',
+  'ytd-rich-section-renderer ytd-statement-banner-renderer',
+  '[data-purpose="ad-badge"]',
+  '[aria-label="Sponsored"]',
+  '[aria-label*="Sponsored" i]',
+  '[aria-label*="Advertisement" i]',
+  'iframe[src*="doubleclick.net" i]',
+  'iframe[src*="googlesyndication.com" i]',
+  'iframe[src*="googleadservices.com" i]'
+];
+
+const SKIP_BUTTON_SELECTORS = [
+  '.ytp-ad-skip-button',
+  '.ytp-ad-skip-button-modern',
+  '.ytp-skip-ad-button',
+  '.ytp-ad-skip-button-container button'
+];
+
+const CARD_SELECTORS = [
+  'ytd-rich-item-renderer',
+  'ytd-video-renderer',
+  'ytd-compact-video-renderer',
+  'ytd-grid-video-renderer',
+  'ytd-reel-item-renderer',
+  'ytd-rich-section-renderer',
+  'ytd-shelf-renderer'
+];
+
+const AD_TEXT_RE = /\\b(ad|ads|advertisement|sponsored|sponsor|promoted)\\b/i;
+const PROMO_TEXT_RE = /youtube playables|includes paid promotion/i;
+let cleanupEnabled = true;
+let cleanTimer = 0;
+
+// Keep the content script scoped to YouTube so the extension never touches other sites.
+function isYouTubePage() {
+  return location.hostname === 'youtube.com' || location.hostname.endsWith('.youtube.com');
 }
-cleanPage();
-new MutationObserver(cleanPage).observe(document.documentElement,{childList:true,subtree:true});`,
-    styleCss: '',
-    popupMessage: 'Ads, popups, and sponsored blocks are cleaned automatically.',
+
+function textFor(element) {
+  if (!element) return '';
+  return [
+    element.getAttribute('aria-label') || '',
+    element.getAttribute('title') || '',
+    element.textContent || ''
+  ].join(' ');
+}
+
+function collectMatches(root, selectors) {
+  const selector = selectors.join(',');
+  const matches = [];
+  if (root?.nodeType === Node.ELEMENT_NODE && root.matches(selector)) {
+    matches.push(root);
+  }
+  root?.querySelectorAll?.(selector).forEach((element) => matches.push(element));
+  return matches;
+}
+
+function removeElement(element) {
+  if (!element || element.hasAttribute(CLEANED_ATTR)) return;
+  element.setAttribute(CLEANED_ATTR, 'true');
+  element.remove();
+}
+
+function removeSponsoredCards(root = document) {
+  collectMatches(root, CARD_SELECTORS).forEach((card) => {
+    const text = textFor(card);
+    const hasAdRenderer = card.querySelector('ytd-ad-slot-renderer,ytd-display-ad-renderer,ytd-promoted-video-renderer,ytd-promoted-sparkles-web-renderer,[data-purpose="ad-badge"]');
+    if (hasAdRenderer || AD_TEXT_RE.test(text) || PROMO_TEXT_RE.test(text)) {
+      removeElement(card);
+    }
   });
+}
+
+function clickSkipButtons() {
+  if (!cleanupEnabled) return;
+  collectMatches(document, SKIP_BUTTON_SELECTORS).forEach((button) => {
+    try { button.click(); } catch {}
+  });
+}
+
+function cleanVideoAdUi() {
+  if (!cleanupEnabled) return;
+  const player = document.querySelector('.html5-video-player.ad-showing,.html5-video-player[class*="ad-showing"]');
+  if (!player) {
+    clickSkipButtons();
+    return;
+  }
+  player.querySelectorAll('.ytp-ad-overlay-container,.ytp-ad-player-overlay').forEach(removeElement);
+  clickSkipButtons();
+}
+
+function cleanPage(root = document){
+  if (!cleanupEnabled || !isYouTubePage()) return;
+  try {
+  // Remove only known ad containers; avoid thumbnails, normal videos, and player internals.
+  collectMatches(root, AD_UI_SELECTORS).forEach((element) => {
+    const card = element.closest(CARD_SELECTORS.join(','));
+    if (card) {
+      removeElement(card);
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 || rect.height > 0) removeElement(element);
+  });
+  collectMatches(root, ['[class*="popup" i]', '[id*="popup" i]', '[class*="overlay" i]', '[id*="overlay" i]']).forEach((element) => {
+    if (!AD_TEXT_RE.test(textFor(element))) return;
+    removeElement(element);
+  });
+  removeSponsoredCards(root);
+  cleanVideoAdUi();
+  if (document.documentElement) document.documentElement.style.overflow = 'auto';
+  if (document.body) document.body.style.overflow = 'auto';
+  } catch (error) {
+    console.warn('Extensio YouTube cleanup skipped one scan:', error);
+  }
+}
+
+function scheduleClean(root = document) {
+  if (!cleanupEnabled) return;
+  window.clearTimeout(cleanTimer);
+  // Debounce dynamic YouTube updates so route changes do not trigger repeated full scans.
+  cleanTimer = window.setTimeout(() => cleanPage(root), 120);
+}
+
+function initObserver() {
+  const target = document.documentElement || document.body;
+  if (!target) return;
+
+  const observer = new MutationObserver((mutations) => {
+    if (!cleanupEnabled) return;
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        scheduleClean(node);
+        return;
+      }
+    }
+  });
+
+  observer.observe(target, { childList: true, subtree: true });
+}
+
+async function loadSettings() {
+  try {
+    const result = await chrome.storage.local.get({ [STORAGE_KEY]: true });
+    cleanupEnabled = Boolean(result[STORAGE_KEY]);
+  } catch (error) {
+    cleanupEnabled = true;
+    console.warn('Extensio could not read settings, using enabled mode:', error);
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[STORAGE_KEY]) return;
+  cleanupEnabled = Boolean(changes[STORAGE_KEY].newValue);
+  if (cleanupEnabled) scheduleClean();
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== 'EXTENSIO_CLEAN_NOW') return false;
+  cleanupEnabled = Boolean(message.enabled);
+  if (cleanupEnabled) cleanPage();
+  sendResponse({ ok: true, enabled: cleanupEnabled });
+  return true;
+});
+
+async function start() {
+  if (!isYouTubePage()) return;
+  await loadSettings();
+  initObserver();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => scheduleClean(), { once: true });
+  } else {
+    scheduleClean();
+  }
+  window.setInterval(() => {
+    if (cleanupEnabled) cleanVideoAdUi();
+  }, 1500);
+}
+
+start();`;
+  const styleCss = `/* Cleanup is controlled from content.js so the popup toggle can disable it instantly. */`;
+  const popupJs = `const STORAGE_KEY = 'youtubeAdCleanupEnabled';
+const toggle = document.getElementById('cleanupToggle');
+const statusText = document.getElementById('statusText');
+
+function setStatus(enabled) {
+  statusText.textContent = enabled ? 'Cleanup enabled on YouTube' : 'Cleanup disabled';
+  toggle.checked = enabled;
+}
+
+async function notifyActiveTab(enabled) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url || !new URL(tab.url).hostname.endsWith('youtube.com')) return;
+    await chrome.tabs.sendMessage(tab.id, { type: 'EXTENSIO_CLEAN_NOW', enabled });
+  } catch (error) {
+    console.warn('Extensio popup could not notify the current tab:', error);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const result = await chrome.storage.local.get({ [STORAGE_KEY]: true });
+    setStatus(Boolean(result[STORAGE_KEY]));
+  } catch (error) {
+    setStatus(true);
+  }
+});
+
+toggle.addEventListener('change', async () => {
+  const enabled = toggle.checked;
+  await chrome.storage.local.set({ [STORAGE_KEY]: enabled });
+  setStatus(enabled);
+  await notifyActiveTab(enabled);
+});`;
+  const rules = [
+    { id: 1, priority: 1, action: { type: 'block' }, condition: { urlFilter: '||doubleclick.net^', resourceTypes: ['script', 'xmlhttprequest', 'sub_frame', 'image'] } },
+    { id: 2, priority: 1, action: { type: 'block' }, condition: { urlFilter: '||googlesyndication.com^', resourceTypes: ['script', 'xmlhttprequest', 'sub_frame', 'image'] } },
+    { id: 3, priority: 1, action: { type: 'block' }, condition: { urlFilter: '||googleadservices.com^', resourceTypes: ['script', 'xmlhttprequest', 'sub_frame', 'image'] } },
+  ];
+
+  return {
+    name,
+    description,
+    files: [
+      {
+        filename: 'manifest.json',
+        content: JSON.stringify({
+          manifest_version: 3,
+          name,
+          version: '1.0.0',
+          description,
+          permissions: ['declarativeNetRequest', 'storage', 'tabs'],
+          host_permissions: [
+            '*://*.youtube.com/*',
+            '*://*.doubleclick.net/*',
+            '*://*.googlesyndication.com/*',
+            '*://*.googleadservices.com/*',
+          ],
+          declarative_net_request: {
+            rule_resources: [
+              { id: 'youtube_ad_rules', enabled: true, path: 'rules.json' },
+            ],
+          },
+          action: { default_popup: 'popup.html' },
+          content_scripts: [
+            {
+              matches: ['*://*.youtube.com/*'],
+              js: ['content.js'],
+              css: ['style.css'],
+              run_at: 'document_idle',
+            },
+          ],
+        }, null, 2),
+      },
+      { filename: 'background.js', content: "chrome.runtime.onInstalled.addListener(()=>console.log('YouTube Ad Cleaner installed'));" },
+      { filename: 'content.js', content: contentJs },
+      { filename: 'style.css', content: styleCss },
+      { filename: 'rules.json', content: JSON.stringify(rules, null, 2) },
+      {
+        filename: 'popup.html',
+        content: `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title><style>body{width:280px;font-family:Arial,sans-serif;margin:0;color:#111827;background:#f8fafc}.wrap{padding:16px}h1{font-size:16px;margin:0 0 8px}.row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:12px;border:1px solid #dbe4ef;border-radius:12px;background:white}p{font-size:13px;line-height:1.45;color:#475569}.switch{position:relative;width:46px;height:26px}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#cbd5e1;border-radius:999px;transition:.2s}.slider:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:white;border-radius:50%;transition:.2s;box-shadow:0 1px 3px #0003}input:checked+.slider{background:#10b981}input:checked+.slider:before{transform:translateX(20px)}#statusText{font-weight:700;color:#0f172a}</style></head><body><main class="wrap"><h1>${name}</h1><p>Clean YouTube sidebar ads, banners, sponsored cards, and visible overlays without changing video playback.</p><section class="row"><span id="statusText">Loading...</span><label class="switch" aria-label="Enable YouTube ad cleanup"><input id="cleanupToggle" type="checkbox"><span class="slider"></span></label></section></main><script src="popup.js"></script></body></html>`,
+      },
+      { filename: 'popup.js', content: popupJs },
+    ],
+  };
 }
 
 function darkModePayload() {
