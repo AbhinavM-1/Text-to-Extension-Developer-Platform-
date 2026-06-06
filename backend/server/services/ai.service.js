@@ -32,16 +32,40 @@ async function generateWithGroq(userPrompt) {
 }
 
 async function createJsonCompletion({ client, model, userPrompt }) {
-  const response = await client.chat.completions.create({
-    model,
-    temperature: 0.2,
-    messages: [
-      { role: 'system', content: EXTENSION_SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt },
-    ],
-  });
+  let lastError;
 
-  return parseJsonObject(response.choices[0].message.content);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await client.chat.completions.create({
+        model,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: EXTENSION_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+
+      const content = response.choices?.[0]?.message?.content;
+      if (!content) throw withStatus(new Error('AI provider returned an empty response.'), 502);
+      return parseJsonObject(content);
+    } catch (error) {
+      lastError = error;
+      if (!isRecoverableProviderError(error) || attempt === 3) break;
+      await delay(400 * attempt);
+    }
+  }
+
+  throw lastError;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function withStatus(error, status) {
+  error.status = status;
+  return error;
 }
 
 function parseJsonObject(content = '') {
@@ -115,7 +139,7 @@ function imageSquarePayload(userPrompt = '') {
           version: '1.0.0',
           description: `Replaces page images with ${color.label} ${shape.plural}.`,
           action: { default_popup: 'popup.html' },
-          content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['style.css'], run_at: 'document_idle' }],
+          content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['styles.css'], run_at: 'document_idle' }],
         }, null, 2),
       },
       {
@@ -127,7 +151,7 @@ function imageSquarePayload(userPrompt = '') {
         content: `function replaceImages(){document.querySelectorAll('img').forEach((img)=>{const box=document.createElement('div');box.className='extensio-image-replacement extensio-shape-${shape.label}';const width=img.width||160;const height=img.height||120;box.style.width=${shape.forceSquare ? 'Math.max(width,height)' : 'width'}+'px';box.style.height=${shape.forceSquare ? 'Math.max(width,height)' : 'height'}+'px';img.replaceWith(box);});}replaceImages();new MutationObserver(replaceImages).observe(document.documentElement,{childList:true,subtree:true});`,
       },
       {
-        filename: 'style.css',
+        filename: 'styles.css',
         content: `.extensio-image-replacement{display:inline-block;background:${color.hex};border:2px solid ${color.border};box-sizing:border-box}.extensio-shape-circle{border-radius:9999px}.extensio-shape-rounded-box,.extensio-shape-rounded-rectangle{border-radius:12px}`,
       },
       {
@@ -422,7 +446,7 @@ toggle.addEventListener('change', async () => {
             {
               matches: ['*://*.youtube.com/*'],
               js: ['content.js'],
-              css: ['style.css'],
+              css: ['styles.css'],
               run_at: 'document_idle',
             },
           ],
@@ -430,7 +454,7 @@ toggle.addEventListener('change', async () => {
       },
       { filename: 'background.js', content: "chrome.runtime.onInstalled.addListener(()=>console.log('YouTube Ad Cleaner installed'));" },
       { filename: 'content.js', content: contentJs },
-      { filename: 'style.css', content: styleCss },
+      { filename: 'styles.css', content: styleCss },
       { filename: 'rules.json', content: JSON.stringify(rules, null, 2) },
       {
         filename: 'popup.html',
@@ -523,7 +547,7 @@ function extensionPayload({ name, description, contentJs, styleCss, popupMessage
         version: '1.0.0',
         description,
         action: { default_popup: 'popup.html' },
-        content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['style.css'], run_at: 'document_idle' }],
+        content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['styles.css'], run_at: 'document_idle' }],
       }, null, 2),
     },
     {
@@ -531,7 +555,7 @@ function extensionPayload({ name, description, contentJs, styleCss, popupMessage
       content: "chrome.runtime.onInstalled.addListener(()=>console.log('Extensio extension installed'));",
     },
     { filename: 'content.js', content: contentJs },
-    { filename: 'style.css', content: styleCss || '/* No styles required. */' },
+    { filename: 'styles.css', content: styleCss || '/* No styles required. */' },
     {
       filename: 'popup.html',
       content: `<!doctype html><html><head><meta charset="utf-8"><title>${name}</title><style>body{width:240px;font-family:Arial,sans-serif;margin:16px;color:#111827}h1{font-size:16px;margin:0 0 8px}p{font-size:13px;line-height:1.45}</style></head><body><h1>${name}</h1><p>${popupMessage}</p><script src="popup.js"></script></body></html>`,

@@ -163,7 +163,7 @@ export async function loginWithOAuth({ providerName, code, state }) {
     throw error;
   }
 
-  let user = await User.findOne({ email: profile.email.toLowerCase() });
+  let user = await User.findOne({ email: profile.email.toLowerCase(), deletedAt: null });
   if (!user) {
     const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
     user = await User.create({
@@ -189,7 +189,7 @@ export async function loginWithOAuth({ providerName, code, state }) {
 }
 
 export async function registerUser({ name, email, password }) {
-  const existing = await User.findOne({ email });
+  const existing = await User.findOne({ email, deletedAt: null });
   if (existing) {
     const error = new Error('Email is already registered');
     error.status = 409;
@@ -203,7 +203,7 @@ export async function registerUser({ name, email, password }) {
 }
 
 export async function loginUser({ email, password }) {
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email, deletedAt: null });
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
     const error = new Error('Invalid email or password');
     error.status = 401;
@@ -213,7 +213,7 @@ export async function loginUser({ email, password }) {
 }
 
 export async function createPasswordReset(email) {
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email, deletedAt: null });
   if (!user) return { ok: true };
 
   const token = crypto.randomBytes(24).toString('hex');
@@ -222,4 +222,42 @@ export async function createPasswordReset(email) {
   await user.save();
 
   return { ok: true, resetToken: token };
+}
+
+export async function resetPassword({ token, password }) {
+  const passwordResetToken = crypto.createHash('sha256').update(token).digest('hex');
+  const user = await User.findOne({
+    passwordResetToken,
+    passwordResetExpires: { $gt: new Date() },
+    deletedAt: null,
+  });
+
+  if (!user) {
+    const error = new Error('Reset token is invalid or expired');
+    error.status = 422;
+    throw error;
+  }
+
+  user.passwordHash = await bcrypt.hash(password, 12);
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+  await user.save();
+
+  return { ok: true };
+}
+
+export async function updateUserProfile({ user, name, email }) {
+  if (email && email !== user.email) {
+    const existing = await User.findOne({ email, deletedAt: null });
+    if (existing && String(existing._id) !== String(user._id)) {
+      const error = new Error('Email is already in use');
+      error.status = 409;
+      throw error;
+    }
+    user.email = email;
+  }
+
+  if (name) user.name = name;
+  await user.save();
+  return { user, token: signToken(user) };
 }

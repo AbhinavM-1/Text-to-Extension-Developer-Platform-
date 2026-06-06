@@ -1,4 +1,4 @@
-import { buildOAuthAuthorizationUrl, createPasswordReset, loginUser, loginWithOAuth, registerUser } from '../services/auth.service.js';
+import { buildOAuthAuthorizationUrl, createPasswordReset, loginUser, loginWithOAuth, registerUser, resetPassword, updateUserProfile } from '../services/auth.service.js';
 import { Subscription } from '../models/Subscription.js';
 
 export async function register(req, res, next) {
@@ -30,6 +30,28 @@ export async function forgotPassword(req, res, next) {
       message: 'If that email exists, a reset link has been prepared.',
       resetToken: process.env.NODE_ENV === 'production' ? undefined : result.resetToken,
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function completePasswordReset(req, res, next) {
+  try {
+    await resetPassword(req.body);
+    res.json({ message: 'Password reset successful. You can login now.' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateProfile(req, res, next) {
+  try {
+    const result = await updateUserProfile({
+      user: req.user,
+      name: req.body.name,
+      email: req.body.email,
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

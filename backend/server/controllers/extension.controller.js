@@ -4,13 +4,35 @@ import { generateExtensionJson, localTemplatePayload } from '../services/ai.serv
 import { normalizeFiles, validateExtensionFiles } from '../services/validator.service.js';
 import { scanGeneratedFiles } from '../services/security.service.js';
 import { packageExtension } from '../services/zip.service.js';
+import { recordSuccessfulGeneration } from '../middleware/subscription.middleware.js';
+
+const MAX_PAGE_SIZE = 50;
 
 export async function listExtensions(req, res, next) {
   try {
-    const query = { owner: req.user._id };
-    if (req.query.search) query.$text = { $search: req.query.search };
-    const extensions = await Extension.find(query).sort({ updatedAt: -1 });
-    res.json(extensions);
+    const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 25, 1), MAX_PAGE_SIZE);
+    const query = { owner: req.user._id, deletedAt: null };
+    if (req.query.search) query.$text = { $search: String(req.query.search).trim() };
+
+    const [items, total] = await Promise.all([
+      Extension.find(query)
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Extension.countDocuments(query),
+    ]);
+
+    res.json({
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit) || 1,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -165,7 +187,7 @@ function validatePromptIntent(prompt, files, manifest) {
 
 export async function getExtension(req, res, next) {
   try {
-    const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id });
+    const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id, deletedAt: null });
     if (!extension) return res.status(404).json({ message: 'Extension not found' });
     res.json(extension);
   } catch (error) {
@@ -175,16 +197,13 @@ export async function getExtension(req, res, next) {
 
 export async function editExtension(req, res, next) {
   try {
-    const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id });
+    const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id, deletedAt: null });
     if (!extension) return res.status(404).json({ message: 'Extension not found' });
 
-    const aiPayload = await generateExtensionJson(buildEditPrompt({ editPrompt: req.body.editPrompt, files: extension.files }));
-    const files = normalizeFiles(aiPayload);
-    const manifest = validateExtensionFiles(files);
-    const securityScan = scanGeneratedFiles(files);
-    if (securityScan.findings.some(item => item.severity === 'critical')) {
-      return res.status(422).json({ message: 'Edited code failed malicious-code detection', securityScan });
-    }
+    const { aiPayload, files, manifest, securityScan } = await buildSafeEditedExtension({
+      editPrompt: req.body.editPrompt,
+      files: extension.files,
+    });
 
     const version = extension.versionHistory.length + 1;
     const zip = await packageExtension({ extensionId: extension._id, version, name: aiPayload.name || manifest.name, files });
@@ -204,6 +223,7 @@ export async function editExtension(req, res, next) {
       securityScan,
     });
     await extension.save();
+    await recordSuccessfulGeneration(req);
 
     res.json(extension);
   } catch (error) {
@@ -213,7 +233,11 @@ export async function editExtension(req, res, next) {
 
 export async function deleteExtension(req, res, next) {
   try {
-    const deleted = await Extension.findOneAndDelete({ _id: req.params.id, owner: req.user._id });
+    const deleted = await Extension.findOneAndUpdate(
+      { _id: req.params.id, owner: req.user._id, deletedAt: null },
+      { deletedAt: new Date() },
+      { new: true },
+    );
     if (!deleted) return res.status(404).json({ message: 'Extension not found' });
     res.json({ ok: true });
   } catch (error) {
@@ -221,12 +245,89 @@ export async function deleteExtension(req, res, next) {
   }
 }
 
+export async function duplicateExtension(req, res, next) {
+  try {
+    const source = await Extension.findOne({ _id: req.params.id, owner: req.user._id, deletedAt: null });
+    if (!source) return res.status(404).json({ message: 'Extension not found' });
+
+    const extension = await Extension.create({
+      owner: req.user._id,
+      name: `${source.name} Copy`,
+      description: source.description,
+      prompt: source.prompt,
+      files: source.files,
+      versionHistory: [{
+        version: 1,
+        prompt: `Duplicated from ${source.name}`,
+        files: source.files,
+        securityScan: source.versionHistory.at(-1)?.securityScan,
+      }],
+    });
+
+    const zip = await packageExtension({ extensionId: extension._id, version: 1, name: extension.name, files: extension.files });
+    extension.zipPath = zip.zipPath;
+    extension.zipUrl = zip.zipUrl;
+    extension.versionHistory[0].zipPath = zip.zipPath;
+    extension.versionHistory[0].zipUrl = zip.zipUrl;
+    await extension.save();
+    await recordSuccessfulGeneration(req);
+
+    res.status(201).json(extension);
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function scanExtension(req, res, next) {
   try {
-    const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id });
+    const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id, deletedAt: null });
     if (!extension) return res.status(404).json({ message: 'Extension not found' });
     res.json(scanGeneratedFiles(extension.files));
   } catch (error) {
     next(error);
   }
+}
+
+async function buildSafeEditedExtension({ editPrompt, files }) {
+  let lastError;
+
+  try {
+    const aiPayload = await generateExtensionJson(buildEditPrompt({ editPrompt, files }));
+    const normalizedFiles = normalizeFiles(aiPayload);
+    const manifest = validateExtensionFiles(normalizedFiles);
+    const securityScan = scanGeneratedFiles(normalizedFiles);
+    if (securityScan.findings.some(item => item.severity === 'critical')) {
+      const error = new Error('Edited code failed malicious-code detection');
+      error.status = 422;
+      error.securityScan = securityScan;
+      throw error;
+    }
+    return { aiPayload, files: normalizedFiles, manifest, securityScan };
+  } catch (error) {
+    lastError = error;
+    console.warn(`Groq edit needs repair: ${error.message}`);
+  }
+
+  const repairPayload = await generateExtensionJson(`The previous edit failed validation.
+
+Edit request:
+${editPrompt}
+
+Validation/security error:
+${lastError.message}
+
+Current extension files:
+${JSON.stringify(files)}
+
+Regenerate the complete extension files from scratch as valid Extensio.ai JSON. Preserve the edit request exactly. Return JSON only.`);
+  const normalizedFiles = normalizeFiles(repairPayload);
+  const manifest = validateExtensionFiles(normalizedFiles);
+  const securityScan = scanGeneratedFiles(normalizedFiles);
+  if (securityScan.findings.some(item => item.severity === 'critical')) {
+    const error = new Error('Edited code failed malicious-code detection');
+    error.status = 422;
+    error.securityScan = securityScan;
+    throw error;
+  }
+  return { aiPayload: repairPayload, files: normalizedFiles, manifest, securityScan };
 }

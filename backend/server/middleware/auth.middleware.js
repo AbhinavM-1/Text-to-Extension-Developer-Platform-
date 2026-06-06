@@ -9,7 +9,7 @@ export async function requireAuth(req, res, next) {
     if (!token) return res.status(401).json({ message: 'Authentication required' });
 
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-change-me');
-    const user = await User.findById(payload.sub);
+    const user = await User.findOne({ _id: payload.sub, deletedAt: null });
     if (!user) return res.status(401).json({ message: 'Invalid authentication token' });
 
     const subscription = await Subscription.findOne({ user: user._id });

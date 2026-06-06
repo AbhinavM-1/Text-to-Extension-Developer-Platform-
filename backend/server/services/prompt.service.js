@@ -10,9 +10,9 @@ The JSON must match:
 }
 Rules:
 - Always include a valid Manifest V3 manifest.json.
-- Always include these filenames exactly, even if one file only contains a small harmless stub: manifest.json, background.js, content.js, popup.html, popup.js, style.css.
+- Always include these filenames exactly, even if one file only contains a small harmless stub: manifest.json, background.js, content.js, popup.html, popup.js, styles.css.
 - Include every file referenced by manifest.json.
-- manifest.json must reference content.js and style.css as content script files when page behavior is requested.
+- manifest.json must reference content.js and styles.css as content script files when page behavior is requested.
 - manifest.json action.default_popup must be popup.html.
 - Use least-privilege permissions and host_permissions.
 - Use production-ready, runnable code.

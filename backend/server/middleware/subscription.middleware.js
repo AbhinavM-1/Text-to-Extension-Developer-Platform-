@@ -20,9 +20,21 @@ export async function enforceGenerationQuota(req, res, next) {
     return res.status(402).json({ message: `Free plan limit reached: ${FREE_DAILY_GENERATION_LIMIT} extensions per day` });
   }
 
+  next();
+}
+
+export async function recordSuccessfulGeneration(req) {
+  const subscription = req.subscription || await Subscription.findOne({ user: req.user._id });
+  const plan = subscription?.plan || 'free';
+  if (plan === 'pro' || plan === 'premium') return;
+
+  const key = todayKey();
+  if (req.user.generationUsage.date !== key) {
+    req.user.generationUsage = { date: key, count: 0 };
+  }
+
   req.user.generationUsage.count += 1;
   await req.user.save();
-  next();
 }
 
 export function requirePremiumForApiExtensions(req, res, next) {

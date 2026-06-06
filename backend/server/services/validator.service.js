@@ -1,5 +1,5 @@
 const allowedExtensions = new Set(['.json', '.js', '.html', '.css', '.png', '.svg', '.txt']);
-const requiredFilenames = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js', 'style.css'];
+const requiredFilenames = ['manifest.json', 'background.js', 'content.js', 'popup.html', 'popup.js'];
 
 export function normalizeFiles(aiPayload) {
   if (!aiPayload || !Array.isArray(aiPayload.files)) {
@@ -8,10 +8,31 @@ export function normalizeFiles(aiPayload) {
     throw error;
   }
 
-  return aiPayload.files.map(file => ({
+  const files = aiPayload.files.map(file => ({
     filename: file.filename || file.name,
     content: String(file.content ?? ''),
   }));
+
+  const legacyStyle = files.find(file => file.filename === 'style.css');
+  const modernStyle = files.find(file => file.filename === 'styles.css');
+  if (legacyStyle && !modernStyle) legacyStyle.filename = 'styles.css';
+
+  const manifestFile = files.find(file => file.filename === 'manifest.json');
+  if (manifestFile) {
+    try {
+      const manifest = JSON.parse(manifestFile.content);
+      for (const script of manifest.content_scripts || []) {
+        if (Array.isArray(script.css)) {
+          script.css = script.css.map(filename => filename === 'style.css' ? 'styles.css' : filename);
+        }
+      }
+      manifestFile.content = JSON.stringify(manifest, null, 2);
+    } catch {
+      // The validator will return the precise manifest JSON error later.
+    }
+  }
+
+  return files;
 }
 
 export function validateExtensionFiles(files) {
@@ -34,6 +55,9 @@ export function validateExtensionFiles(files) {
     if (!files.some(file => file.filename === filename)) {
       throwValidation(`${filename} is required`);
     }
+  }
+  if (!files.some(file => file.filename === 'styles.css' || file.filename === 'style.css')) {
+    throwValidation('styles.css is required');
   }
 
   let manifest;

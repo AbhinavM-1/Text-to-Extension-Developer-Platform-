@@ -24,12 +24,19 @@ function getRazorpayClient() {
 }
 
 export async function createRazorpayOrder({ amount, currency = 'INR', receipt, notes = {} }) {
-  return getRazorpayClient().orders.create({
-    amount: amount * 100,
-    currency,
-    receipt,
-    notes,
-  });
+  try {
+    return await getRazorpayClient().orders.create({
+      amount: amount * 100,
+      currency,
+      receipt,
+      notes,
+    });
+  } catch (error) {
+    const message = error?.error?.description || error?.message || 'Unable to create Razorpay order.';
+    const checkoutError = new Error(`Razorpay checkout failed: ${message}`);
+    checkoutError.status = error?.statusCode || 502;
+    throw checkoutError;
+  }
 }
 
 export function getRazorpayKeyId() {

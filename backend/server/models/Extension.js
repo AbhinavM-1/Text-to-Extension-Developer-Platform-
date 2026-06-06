@@ -28,8 +28,10 @@ const extensionSchema = new mongoose.Schema({
   zipPath: String,
   zipUrl: String,
   versionHistory: [versionSchema],
+  deletedAt: { type: Date, default: null, index: true },
 }, { timestamps: true });
 
 extensionSchema.index({ name: 'text', description: 'text', prompt: 'text' });
+extensionSchema.index({ owner: 1, deletedAt: 1, updatedAt: -1 });
 
 export const Extension = mongoose.model('Extension', extensionSchema);
