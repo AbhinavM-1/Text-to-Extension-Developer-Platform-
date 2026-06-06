@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -75,7 +75,7 @@ const navItems = [
 ];
 
 export default function Dashboard() {
-  const { token, subscription, setSubscription, user } = useAuth();
+  const { token, subscription, setSubscription, user, updateProfile } = useAuth();
   const [extensions, setExtensions] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [activePage, setActivePage] = useState('Dashboard');
@@ -90,9 +90,17 @@ export default function Dashboard() {
   const selected = useMemo(() => extensions.find(item => item._id === selectedId) || extensions[0], [extensions, selectedId]);
   const storageKb = Math.max(1, Math.round(JSON.stringify(extensions).length / 1024));
 
+  const loadExtensions = useCallback(async (q = '') => {
+    const data = await apiRequest(`/api/extensions${q ? `?search=${encodeURIComponent(q)}` : ''}`, { token });
+    const items = Array.isArray(data) ? data : data.items || [];
+    setExtensions(items);
+    setSelectedId(current => current || items[0]?._id || '');
+  }, [token]);
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadExtensions();
-  }, []);
+  }, [loadExtensions]);
 
   useEffect(() => {
     const handler = event => {
@@ -106,24 +114,16 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!loading) {
-      setProgressStep(0);
-      return undefined;
-    }
+    if (!loading) return undefined;
     const interval = setInterval(() => {
       setProgressStep(step => Math.min(step + 1, generationSteps.length - 1));
     }, 650);
     return () => clearInterval(interval);
   }, [loading]);
 
-  async function loadExtensions(q = '') {
-    const data = await apiRequest(`/api/extensions${q ? `?search=${encodeURIComponent(q)}` : ''}`, { token });
-    setExtensions(data);
-    if (!selectedId && data[0]) setSelectedId(data[0]._id);
-  }
-
   async function generate(event) {
     event.preventDefault();
+    setProgressStep(0);
     setLoading(true);
     const toastId = toast.loading('Generating extension with AI...');
     try {
@@ -146,6 +146,7 @@ export default function Dashboard() {
   async function edit(event) {
     event.preventDefault();
     if (!selected) return;
+    setProgressStep(0);
     setLoading(true);
     const toastId = toast.loading('Applying edit request...');
     try {
@@ -170,6 +171,19 @@ export default function Dashboard() {
     await loadExtensions();
     if (selectedId === id) setSelectedId('');
     toast.success('Extension deleted');
+  }
+
+  async function duplicateExtension(id) {
+    const toastId = toast.loading('Duplicating extension...');
+    try {
+      const extension = await apiRequest(`/api/extensions/${id}/duplicate`, { token, method: 'POST' });
+      await loadExtensions();
+      setSelectedId(extension._id);
+      setActivePage('My Extensions');
+      toast.success('Extension duplicated', { id: toastId });
+    } catch (error) {
+      toast.error(error.message, { id: toastId });
+    }
   }
 
   async function choosePlan(plan, billingCycle = 'monthly', paymentMethod = 'upi') {
@@ -260,7 +274,7 @@ export default function Dashboard() {
             <TopNav user={user} subscription={subscription} search={search} setSearch={setSearch} onSearch={() => { loadExtensions(search); setActivePage('My Extensions'); }} onCommand={() => setCommandOpen(true)} />
 
             <AnimatePresence mode="wait">
-              <motion.div key={activePage} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.18 }} className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
+              <motion.div key={activePage} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.18 }} className={clsx('mx-auto max-w-7xl px-4 lg:px-8', activePage === 'Billing' ? 'py-3 xl:h-[calc(100vh-73px)] xl:overflow-hidden' : 'py-6')}>
                 <DashboardPage
                   activePage={activePage}
                   extensions={extensions}
@@ -268,6 +282,7 @@ export default function Dashboard() {
                   selectedId={selected?._id}
                   setSelectedId={setSelectedId}
                   removeExtension={removeExtension}
+                  duplicateExtension={duplicateExtension}
                   prompt={prompt}
                   setPrompt={setPrompt}
                   generate={generate}
@@ -280,6 +295,8 @@ export default function Dashboard() {
                   choosePlan={choosePlan}
                   storageKb={storageKb}
                   setActivePage={setActivePage}
+                  user={user}
+                  updateProfile={updateProfile}
                 />
               </motion.div>
             </AnimatePresence>
@@ -297,6 +314,7 @@ function DashboardPage({
   selectedId,
   setSelectedId,
   removeExtension,
+  duplicateExtension,
   prompt,
   setPrompt,
   generate,
@@ -309,6 +327,8 @@ function DashboardPage({
   choosePlan,
   storageKb,
   setActivePage,
+  user,
+  updateProfile,
 }) {
   if (activePage === 'New Extension') {
     return (
@@ -331,7 +351,7 @@ function DashboardPage({
     return (
       <PageShell eyebrow="My Extensions" title="Manage every generated extension" subtitle="Open, edit, duplicate, download, or delete your extension projects from this workspace.">
         <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-          <SearchAndHistory extensions={extensions} selectedId={selectedId} setSelectedId={setSelectedId} removeExtension={removeExtension} />
+          <SearchAndHistory extensions={extensions} selectedId={selectedId} setSelectedId={setSelectedId} removeExtension={removeExtension} duplicateExtension={duplicateExtension} />
           <section className="min-w-0 space-y-6">
             <SelectedExtension selected={selected} editPrompt={editPrompt} setEditPrompt={setEditPrompt} edit={edit} loading={loading} />
             <FileViewer extension={selected} />
@@ -365,7 +385,7 @@ function DashboardPage({
 
   if (activePage === 'Billing') {
     return (
-      <PageShell eyebrow="Billing" title="Payment dashboard and subscription plans" subtitle="Free users get 5 extension generations per day. Upgrade with UPI, card, or netbanking when you need production-scale usage.">
+      <PageShell compact eyebrow="Billing" title="Payment dashboard and subscription plans" subtitle="Free users get 5 extension generations per day. Upgrade with UPI, card, or netbanking when you need production-scale usage.">
         <BillingBoard subscription={subscription} choosePlan={choosePlan} />
       </PageShell>
     );
@@ -374,18 +394,20 @@ function DashboardPage({
   if (activePage === 'Settings') {
     return (
       <PageShell eyebrow="Settings" title="Workspace and security controls" subtitle="Manage profile preferences, API provider settings, theme controls, and team-ready configuration.">
-        <section className="grid gap-6 lg:grid-cols-3">
-          {[
-            ['Profile Settings', 'Manage account identity and workspace preferences.'],
-            ['API Key Management', 'Connect Groq, Gemini, or future AI providers securely.'],
-            ['Theme Settings', 'Dark and light appearance controls for your workspace.'],
-          ].map(([title, text]) => (
-            <motion.div key={title} whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
-              <Settings className="text-[#00E599]" size={20} />
-              <h3 className="mt-4 font-black">{title}</h3>
-              <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">{text}</p>
-            </motion.div>
-          ))}
+        <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <ProfileSettings user={user} updateProfile={updateProfile} />
+          <div className="grid gap-6">
+            {[
+              ['API Key Management', 'Connect Groq, Gemini, Razorpay, or OAuth providers through backend environment variables.'],
+              ['Theme Settings', 'Dark workspace is enabled with accessible contrast and responsive layouts.'],
+            ].map(([title, text]) => (
+              <motion.div key={title} whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
+                <Settings className="text-[#00E599]" size={20} />
+                <h3 className="mt-4 font-black">{title}</h3>
+                <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">{text}</p>
+              </motion.div>
+            ))}
+          </div>
         </section>
       </PageShell>
     );
@@ -408,13 +430,13 @@ function DashboardPage({
   );
 }
 
-function PageShell({ eyebrow, title, subtitle, children }) {
+function PageShell({ eyebrow, title, subtitle, children, compact = false }) {
   return (
-    <div className="space-y-6">
-      <section className="glass-panel rounded-3xl p-6 lg:p-8">
-        <p className="text-sm font-black uppercase tracking-[0.24em] text-[#00E599]">{eyebrow}</p>
-        <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-tight lg:text-5xl">{title}</h1>
-        <p className="mt-4 max-w-3xl text-sm leading-6 text-[#9CA3AF] lg:text-base">{subtitle}</p>
+    <div className={clsx(compact ? 'space-y-2 xl:h-full xl:overflow-hidden' : 'space-y-6')}>
+      <section className={clsx('glass-panel', compact ? 'rounded-2xl p-3 lg:p-4' : 'rounded-3xl p-6 lg:p-8')}>
+        <p className={clsx('font-black uppercase tracking-[0.24em] text-[#00E599]', compact ? 'text-[11px]' : 'text-sm')}>{eyebrow}</p>
+        <h1 className={clsx('max-w-4xl font-black tracking-tight', compact ? 'mt-1 text-2xl lg:text-3xl' : 'mt-3 text-4xl lg:text-5xl')}>{title}</h1>
+        <p className={clsx('max-w-3xl text-[#9CA3AF]', compact ? 'mt-1 text-xs leading-5' : 'mt-4 text-sm leading-6 lg:text-base')}>{subtitle}</p>
       </section>
       {children}
     </div>
@@ -546,23 +568,25 @@ function BillingBoard({ subscription, choosePlan }) {
     setProcessing(true);
     try {
       await choosePlan(selectedPlan, billingCycle, selectedPlan === 'free' ? 'free' : paymentMethod);
+    } catch (error) {
+      toast.error(error.message || 'Unable to process checkout. Please try again.');
     } finally {
       setProcessing(false);
     }
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-      <section className="space-y-4">
-        <div className="glass-panel rounded-2xl p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="grid gap-2 xl:h-[calc(100%-105px)] xl:grid-cols-[1.2fr_0.8fr] xl:overflow-hidden">
+      <section className="flex flex-col gap-2 xl:min-h-0">
+        <div className="glass-panel rounded-2xl p-3">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <SectionHeader eyebrow="Plans" title="Choose your workspace limit" />
-              <p className="mt-2 text-sm text-[#9CA3AF]">Pricing is INR-first and tuned for student builders, hackathons, and early-stage creators.</p>
+              <SectionHeader compact eyebrow="Plans" title="Choose your workspace limit" />
+              <p className="mt-0.5 text-[11px] leading-4 text-[#9CA3AF]">Pricing is INR-first and tuned for student builders, hackathons, and early-stage creators.</p>
             </div>
-            <div className="inline-flex rounded-2xl border border-[#1F2937] bg-[#030712] p-1">
+            <div className="inline-flex rounded-xl border border-[#1F2937] bg-[#030712] p-1">
               {['monthly', 'yearly'].map(cycle => (
-                <button key={cycle} onClick={() => setBillingCycle(cycle)} className={clsx('rounded-xl px-4 py-2 text-sm font-black capitalize transition', billingCycle === cycle ? 'premium-gradient text-[#030712]' : 'text-[#9CA3AF] hover:text-[#F9FAFB]')}>
+                <button key={cycle} onClick={() => setBillingCycle(cycle)} className={clsx('rounded-lg px-3 py-1.5 text-xs font-black capitalize transition', billingCycle === cycle ? 'premium-gradient text-[#030712]' : 'text-[#9CA3AF] hover:text-[#F9FAFB]')}>
                   {cycle}
                 </button>
               ))}
@@ -570,7 +594,7 @@ function BillingBoard({ subscription, choosePlan }) {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        <div className="grid flex-1 gap-2 lg:grid-cols-3">
           {Object.entries(billingPlans).map(([key, item]) => {
             const active = currentPlan === key;
             const selected = selectedPlan === key;
@@ -578,56 +602,60 @@ function BillingBoard({ subscription, choosePlan }) {
               <motion.button
                 key={key}
                 type="button"
-                whileHover={{ y: -5 }}
+                whileHover={{ y: -2 }}
                 onClick={() => setSelectedPlan(key)}
-                className={clsx('relative rounded-2xl border p-5 text-left transition', selected ? 'border-[#00E599] bg-[#00E599]/10 shadow-2xl shadow-emerald-500/10' : 'border-[#1F2937] bg-[#111827]/80 hover:border-[#00E599]/50')}
+                className={clsx('relative flex h-full flex-col rounded-2xl border p-4 text-left transition', selected ? 'border-[#00E599] bg-[#00E599]/10 shadow-2xl shadow-emerald-500/10' : 'border-[#1F2937] bg-[#111827]/80 hover:border-[#00E599]/50')}
               >
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-xl font-black">{item.name}</p>
-                    <p className="mt-2 min-h-12 text-sm leading-6 text-[#9CA3AF]">{item.description}</p>
+                    <p className="text-lg font-black">{item.name}</p>
+                    <p className="mt-1 min-h-12 text-xs leading-5 text-[#9CA3AF]">{item.description}</p>
                   </div>
-                  <span className={clsx('rounded-full px-3 py-1 text-[11px] font-black uppercase', item.badge === 'Recommended' ? 'premium-gradient text-[#030712]' : 'bg-[#030712] text-[#00E599]')}>
+                  <span className={clsx('rounded-full px-2 py-0.5 text-[9px] font-black uppercase', item.badge === 'Recommended' ? 'premium-gradient text-[#030712]' : 'bg-[#030712] text-[#00E599]')}>
                     {active ? 'Current' : item.badge}
                   </span>
                 </div>
-                <p className="mt-5 text-3xl font-black">₹{item.price[billingCycle].toLocaleString('en-IN')}<span className="text-sm text-[#9CA3AF]">/{billingCycle === 'yearly' ? 'yr' : 'mo'}</span></p>
-                <div className="mt-5 space-y-2">
+                <p className="mt-4 text-2xl font-black">₹{item.price[billingCycle].toLocaleString('en-IN')}<span className="text-xs text-[#9CA3AF]">/{billingCycle === 'yearly' ? 'yr' : 'mo'}</span></p>
+                <div className="mt-4 space-y-2">
                   {item.features.map(feature => (
-                    <p key={feature} className="flex items-center gap-2 text-sm text-[#D1D5DB]">
-                      <ShieldCheck size={15} className="text-[#00E599]" />
+                    <p key={feature} className="flex items-center gap-2 text-xs text-[#D1D5DB]">
+                      <ShieldCheck size={13} className="text-[#00E599]" />
                       {feature}
                     </p>
                   ))}
                 </div>
+                <span className={clsx('mb-3 mt-auto flex w-full items-center justify-center whitespace-nowrap rounded-xl px-3 py-2 text-xs font-black transition', active ? 'bg-[#1F2937] text-[#9CA3AF]' : selected ? 'premium-gradient text-[#030712]' : 'border border-[#1F2937] bg-[#030712] text-[#F9FAFB]')}>
+                  {active ? 'Current plan' : `Choose ${item.name}`}
+                </span>
               </motion.button>
             );
           })}
         </div>
+
       </section>
 
-      <section className="glass-panel rounded-2xl p-5">
+      <section className="glass-panel rounded-2xl p-3 xl:min-h-0">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <SectionHeader eyebrow="Checkout" title="Secure payment" />
-            <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">Real Razorpay Checkout with UPI, card, and netbanking. Payment is verified on the server before the plan is activated.</p>
+            <SectionHeader compact eyebrow="Checkout" title="Secure payment" />
+            <p className="mt-0.5 text-xs leading-5 text-[#9CA3AF]">Real Razorpay Checkout with UPI, card, and netbanking. Payment is verified on the server before the plan is activated.</p>
           </div>
-          <span className="rounded-2xl bg-[#00E599]/10 p-3 text-[#00E599]">
-            <Receipt size={22} />
+          <span className="rounded-xl bg-[#00E599]/10 p-2 text-[#00E599]">
+            <Receipt size={18} />
           </span>
         </div>
 
-        <form onSubmit={handleCheckout} className="mt-5 space-y-5">
+        <form onSubmit={handleCheckout} className="mt-2 space-y-1.5">
           {selectedPlan !== 'free' && (
             <>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-3">
                 {paymentMethods.map(method => {
                   const Icon = method.icon;
                   return (
-                    <button key={method.id} type="button" onClick={() => setPaymentMethod(method.id)} className={clsx('rounded-2xl border p-4 text-left transition', paymentMethod === method.id ? 'border-[#00E599] bg-[#00E599]/10' : 'border-[#1F2937] bg-[#030712] hover:border-[#00E599]/50')}>
-                      <Icon size={20} className="text-[#00E599]" />
-                      <p className="mt-3 font-black">{method.label}</p>
-                      <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{method.helper}</p>
+                    <button key={method.id} type="button" onClick={() => setPaymentMethod(method.id)} className={clsx('rounded-xl border p-2 text-left transition', paymentMethod === method.id ? 'border-[#00E599] bg-[#00E599]/10' : 'border-[#1F2937] bg-[#030712] hover:border-[#00E599]/50')}>
+                      <Icon size={14} className="text-[#00E599]" />
+                      <p className="mt-1 text-sm font-black">{method.label}</p>
+                      <p className="mt-0.5 text-[10px] leading-4 text-[#9CA3AF]">{method.helper}</p>
                     </button>
                   );
                 })}
@@ -637,32 +665,32 @@ function BillingBoard({ subscription, choosePlan }) {
             </>
           )}
 
-          <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4">
-            <div className="flex items-center justify-between text-sm">
+          <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-2">
+            <div className="flex items-center justify-between text-xs">
               <span className="text-[#9CA3AF]">{plan.name} plan</span>
               <span className="font-black">₹{amount.toLocaleString('en-IN')}</span>
             </div>
-            <div className="mt-3 flex items-center justify-between text-sm">
+            <div className="mt-1.5 flex items-center justify-between text-xs">
               <span className="text-[#9CA3AF]">Billing cycle</span>
               <span className="font-black capitalize">{billingCycle}</span>
             </div>
             {yearlySavings > 0 && (
-              <div className="mt-3 flex items-center justify-between text-sm text-[#00E599]">
+              <div className="mt-1.5 flex items-center justify-between text-xs text-[#00E599]">
                 <span>Yearly savings</span>
                 <span className="font-black">₹{yearlySavings.toLocaleString('en-IN')}</span>
               </div>
             )}
-            <div className="mt-4 border-t border-[#1F2937] pt-4">
+            <div className="mt-1.5 border-t border-[#1F2937] pt-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-black">Total due today</span>
-                <span className="text-2xl font-black">₹{amount.toLocaleString('en-IN')}</span>
+                <span className="text-sm font-black">Total due today</span>
+                <span className="text-lg font-black">₹{amount.toLocaleString('en-IN')}</span>
               </div>
-              <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">Click checkout to open Razorpay. UPI IDs, card numbers, and bank credentials are collected securely by Razorpay, not stored in Extensio.ai.</p>
+              <p className="mt-0.5 text-[10px] leading-4 text-[#9CA3AF]">Click checkout to open Razorpay. Payment credentials are handled securely by Razorpay, not stored in Extensio.ai.</p>
             </div>
           </div>
 
-          <button disabled={processing || currentPlan === selectedPlan} className="flex w-full items-center justify-center gap-2 rounded-xl premium-gradient px-4 py-3 font-black text-[#030712] disabled:opacity-50">
-            <ShieldCheck size={18} />
+          <button disabled={processing || currentPlan === selectedPlan} className="flex w-full items-center justify-center gap-2 rounded-xl premium-gradient px-4 py-2 text-base font-black text-[#030712] disabled:opacity-50">
+            <ShieldCheck size={16} />
             {currentPlan === selectedPlan ? 'Current plan active' : processing ? 'Processing payment...' : selectedPlan === 'free' ? 'Switch to Free' : `Pay ₹${amount.toLocaleString('en-IN')} securely`}
           </button>
         </form>
@@ -680,12 +708,12 @@ function PaymentGatewayNotice({ paymentMethod }) {
   const [title, text] = copy[paymentMethod] || copy.upi;
 
   return (
-    <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-4">
-      <div className="flex items-start gap-3">
-        <ShieldCheck size={20} className="mt-1 shrink-0 text-[#00E599]" />
+    <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-2">
+      <div className="flex items-start gap-2">
+        <ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#00E599]" />
         <div>
-          <p className="font-black">{title}</p>
-          <p className="mt-1 text-sm leading-6 text-[#9CA3AF]">{text}</p>
+          <p className="text-xs font-black">{title}</p>
+          <p className="mt-0.5 text-[10px] leading-4 text-[#9CA3AF]">{text}</p>
         </div>
       </div>
     </div>
@@ -797,7 +825,7 @@ function GenerationProgress({ loading, progressStep }) {
   );
 }
 
-function SearchAndHistory({ extensions, selectedId, setSelectedId, removeExtension }) {
+function SearchAndHistory({ extensions, selectedId, setSelectedId, removeExtension, duplicateExtension }) {
   return (
     <section id="my-extensions" className="glass-panel rounded-2xl p-5">
       <SectionHeader eyebrow="History" title="My Extensions" />
@@ -814,7 +842,7 @@ function SearchAndHistory({ extensions, selectedId, setSelectedId, removeExtensi
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-[#9CA3AF]">
               <span className="rounded-full bg-[#111827] px-2 py-1">v{item.versionHistory?.length || 1}</span>
               <span className="rounded-full bg-[#111827] px-2 py-1">Download</span>
-              <span className="rounded-full bg-[#111827] px-2 py-1">Duplicate</span>
+              <span onClick={(event) => { event.stopPropagation(); duplicateExtension(item._id); }} className="rounded-full bg-[#111827] px-2 py-1 hover:bg-[#00E599]/10 hover:text-[#00E599]">Duplicate</span>
             </div>
           </motion.button>
         ))}
@@ -896,6 +924,47 @@ function ActivityFeed({ extensions }) {
   );
 }
 
+function ProfileSettings({ user, updateProfile }) {
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    const toastId = toast.loading('Saving profile...');
+    try {
+      await updateProfile({
+        name: form.get('name'),
+        email: form.get('email'),
+      });
+      toast.success('Profile updated', { id: toastId });
+    } catch (error) {
+      toast.error(error.message, { id: toastId });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="glass-panel rounded-2xl p-5">
+      <SectionHeader eyebrow="Profile" title="Account details" />
+      <form key={user?._id || user?.email || 'profile'} onSubmit={handleSubmit} className="mt-5 space-y-4">
+        <label className="block">
+          <span className="text-xs font-black uppercase tracking-[0.18em] text-[#9CA3AF]">Name</span>
+          <input name="name" defaultValue={user?.name || ''} className="mt-2 w-full rounded-xl border border-[#1F2937] bg-[#030712] px-4 py-3 outline-none focus:border-[#00E599]/60" />
+        </label>
+        <label className="block">
+          <span className="text-xs font-black uppercase tracking-[0.18em] text-[#9CA3AF]">Email</span>
+          <input name="email" type="email" defaultValue={user?.email || ''} className="mt-2 w-full rounded-xl border border-[#1F2937] bg-[#030712] px-4 py-3 outline-none focus:border-[#00E599]/60" />
+        </label>
+        <button disabled={saving} className="rounded-xl premium-gradient px-5 py-3 font-black text-[#030712] disabled:opacity-60">
+          {saving ? 'Saving...' : 'Save profile'}
+        </button>
+      </form>
+    </section>
+  );
+}
+
 function CommandPalette({ open, onClose, setPrompt }) {
   return (
     <AnimatePresence>
@@ -926,11 +995,11 @@ function CommandPalette({ open, onClose, setPrompt }) {
   );
 }
 
-function SectionHeader({ eyebrow, title }) {
+function SectionHeader({ eyebrow, title, compact = false }) {
   return (
     <div>
-      <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00E599]">{eyebrow}</p>
-      <h2 className="mt-1 text-xl font-black text-[#F9FAFB]">{title}</h2>
+      <p className={clsx('font-black uppercase tracking-[0.22em] text-[#00E599]', compact ? 'text-[10px]' : 'text-xs')}>{eyebrow}</p>
+      <h2 className={clsx('font-black text-[#F9FAFB]', compact ? 'mt-0.5 text-base' : 'mt-1 text-xl')}>{title}</h2>
     </div>
   );
 }

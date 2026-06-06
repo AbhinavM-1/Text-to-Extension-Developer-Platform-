@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
-import { Activity, Crown, Puzzle, Shield, Users } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
+import { Activity, Crown, Puzzle, Shield, Trash2, Users } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import Layout from '../components/Layout.jsx';
 import { apiRequest } from '../services/api.js';
 import { useAuth } from '../services/auth.jsx';
@@ -12,7 +13,7 @@ export default function Admin() {
   const [extensions, setExtensions] = useState([]);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const loadAdminData = useCallback(async () => {
     Promise.all([
       apiRequest('/api/admin/analytics', { token }),
       apiRequest('/api/admin/users', { token }),
@@ -23,6 +24,47 @@ export default function Admin() {
       setExtensions(extensionData);
     }).catch(err => setError(err.message));
   }, [token]);
+
+  useEffect(() => {
+    loadAdminData();
+  }, [loadAdminData]);
+
+  async function removeUser(id) {
+    const toastId = toast.loading('Deleting user...');
+    try {
+      await apiRequest(`/api/admin/users/${id}`, { token, method: 'DELETE' });
+      await loadAdminData();
+      toast.success('User deleted', { id: toastId });
+    } catch (err) {
+      toast.error(err.message, { id: toastId });
+    }
+  }
+
+  async function removeExtension(id) {
+    const toastId = toast.loading('Deleting extension...');
+    try {
+      await apiRequest(`/api/admin/extensions/${id}`, { token, method: 'DELETE' });
+      await loadAdminData();
+      toast.success('Extension deleted', { id: toastId });
+    } catch (err) {
+      toast.error(err.message, { id: toastId });
+    }
+  }
+
+  async function updatePlan(userId, plan) {
+    const toastId = toast.loading('Updating subscription...');
+    try {
+      await apiRequest(`/api/admin/subscriptions/${userId}`, {
+        token,
+        method: 'PATCH',
+        body: JSON.stringify({ plan, status: 'active' }),
+      });
+      await loadAdminData();
+      toast.success('Plan updated', { id: toastId });
+    } catch (err) {
+      toast.error(err.message, { id: toastId });
+    }
+  }
 
   return (
     <Layout>
@@ -62,14 +104,43 @@ export default function Admin() {
           <section className="grid gap-5 lg:grid-cols-2">
             <Panel title="Users" icon={Users}>
               {users.length ? (
-                users.map(user => <Row key={user._id} title={user.email} subtitle={`${user.name} - ${user.role}`} />)
+                users.map(user => (
+                  <Row
+                    key={user._id}
+                    title={user.email}
+                    subtitle={`${user.name} - ${user.role}`}
+                    actions={(
+                      <>
+                        {['free', 'pro', 'premium'].map(plan => (
+                          <button key={plan} onClick={() => updatePlan(user._id, plan)} className="rounded-lg border border-white/10 px-2 py-1 text-[11px] font-black uppercase text-slate-300 hover:border-emerald-300/50 hover:text-emerald-200">
+                            {plan}
+                          </button>
+                        ))}
+                        <button onClick={() => removeUser(user._id)} className="rounded-lg border border-red-400/20 p-2 text-red-300 hover:bg-red-500/10">
+                          <Trash2 size={14} />
+                        </button>
+                      </>
+                    )}
+                  />
+                ))
               ) : (
                 <Empty label="No users loaded yet" />
               )}
             </Panel>
             <Panel title="Extensions" icon={Activity}>
               {extensions.length ? (
-                extensions.map(item => <Row key={item._id} title={item.name} subtitle={item.owner?.email || 'Unknown owner'} />)
+                extensions.map(item => (
+                  <Row
+                    key={item._id}
+                    title={item.name}
+                    subtitle={item.owner?.email || 'Unknown owner'}
+                    actions={(
+                      <button onClick={() => removeExtension(item._id)} className="rounded-lg border border-red-400/20 p-2 text-red-300 hover:bg-red-500/10">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  />
+                ))
               ) : (
                 <Empty label="No extensions loaded yet" />
               )}
@@ -112,14 +183,14 @@ function Panel({ title, icon: Icon, children }) {
   );
 }
 
-function Row({ title, subtitle }) {
+function Row({ title, subtitle, actions }) {
   return (
     <div className="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-white/[0.03]">
       <div className="min-w-0">
         <p className="truncate font-bold text-slate-100">{title}</p>
         <p className="mt-1 truncate text-sm text-slate-500">{subtitle}</p>
       </div>
-      <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-300 shadow-[0_0_20px_rgba(0,229,153,0.8)]" />
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-300 shadow-[0_0_20px_rgba(0,229,153,0.8)]" />}
     </div>
   );
 }

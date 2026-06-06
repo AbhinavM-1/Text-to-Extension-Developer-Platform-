@@ -1,19 +1,10 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Copy, Download, Expand, FileCode2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
-const Editor = lazy(() => import('@monaco-editor/react'));
-
-function languageFor(filename = '') {
-  if (filename.endsWith('.json')) return 'json';
-  if (filename.endsWith('.html')) return 'html';
-  if (filename.endsWith('.css')) return 'css';
-  return 'javascript';
-}
-
 export default function FileViewer({ extension }) {
-  const files = extension?.files || [];
+  const files = useMemo(() => extension?.files || [], [extension?.files]);
   const [activeName, setActiveName] = useState('');
   const [fullscreen, setFullscreen] = useState(false);
   const active = useMemo(() => files.find(file => file.filename === activeName) || files[0], [files, activeName]);
@@ -81,22 +72,9 @@ export default function FileViewer({ extension }) {
 
       <div className={clsx('bg-[#030712]', fullscreen ? 'h-[calc(100vh-9rem)]' : 'h-[520px]')}>
         {active ? (
-          <Suspense fallback={<div className="grid h-full place-items-center text-sm font-bold text-[#9CA3AF]">Loading code workspace...</div>}>
-            <Editor
-              height="100%"
-              language={languageFor(active.filename)}
-              value={active.content}
-              theme="vs-dark"
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                fontSize: 13,
-                wordWrap: 'on',
-                scrollBeyondLastLine: false,
-                padding: { top: 18, bottom: 18 },
-              }}
-            />
-          </Suspense>
+          <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-5 font-mono text-[13px] leading-6 text-slate-200">
+            <code>{active.content}</code>
+          </pre>
         ) : (
           <div className="grid h-full place-items-center px-6 text-center">
             <div>

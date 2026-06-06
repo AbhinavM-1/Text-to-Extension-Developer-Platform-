@@ -3,6 +3,7 @@ import AuthShell from '../components/AuthShell.jsx';
 import { useAuth } from '../services/auth.jsx';
 import { useEffect, useState } from 'react';
 import { API_BASE_URL } from '../services/api.js';
+import { Eye, EyeOff } from 'lucide-react';
 
 const socialProviders = [
   { id: 'google', name: 'Google', mark: 'G', tone: 'bg-white text-[#111827]' },
@@ -13,21 +14,20 @@ const socialProviders = [
 export default function Login() {
   const { acceptOAuthToken, login } = useAuth();
   const navigate = useNavigate();
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => new URLSearchParams(window.location.search).get('oauthError') || '');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const oauthToken = params.get('token');
-    const oauthError = params.get('oauthError');
-
-    if (oauthError) {
-      setError(oauthError);
+    if (params.get('oauthError')) {
       window.history.replaceState({}, '', '/login');
       return;
     }
 
     if (!oauthToken) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     acceptOAuthToken(oauthToken)
       .then(() => {
@@ -54,7 +54,7 @@ export default function Login() {
   }
 
   function startOAuth(provider) {
-    window.location.href = `${API_BASE_URL}/api/auth/oauth/${provider}/start`;
+    window.location.assign(`${API_BASE_URL}/api/auth/oauth/${provider}/start`);
   }
 
   return (
@@ -88,7 +88,17 @@ export default function Login() {
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <input id="login-email" name="email" type="email" required placeholder="Email" className="w-full rounded-xl border border-[#1F2937] bg-[#111827] px-4 py-2.5 text-[#F9FAFB] outline-none placeholder:text-[#6B7280] focus:border-[#00E599]/60" />
-        <input name="password" type="password" required placeholder="Password" className="w-full rounded-xl border border-[#1F2937] bg-[#111827] px-4 py-2.5 text-[#F9FAFB] outline-none placeholder:text-[#6B7280] focus:border-[#00E599]/60" />
+        <div className="relative">
+          <input name="password" type={showPassword ? 'text' : 'password'} required placeholder="Password" className="w-full rounded-xl border border-[#1F2937] bg-[#111827] px-4 py-2.5 pr-12 text-[#F9FAFB] outline-none placeholder:text-[#6B7280] focus:border-[#00E599]/60" />
+          <button
+            type="button"
+            onClick={() => setShowPassword(value => !value)}
+            aria-label={showPassword ? 'Hide password' : 'Show password'}
+            className="absolute right-3 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-[#9CA3AF] transition hover:bg-[#030712] hover:text-[#00E599]"
+          >
+            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
+        </div>
         {error && (
           <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-semibold leading-5 text-red-300">
             {error}

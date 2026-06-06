@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { apiRequest } from './api.js';
 
 const AuthContext = createContext(null);
@@ -8,6 +9,13 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [subscription, setSubscription] = useState(null);
 
+  const logout = useCallback(() => {
+    localStorage.removeItem('extensio_token');
+    setToken(null);
+    setUser(null);
+    setSubscription(null);
+  }, []);
+
   useEffect(() => {
     if (!token) return;
     apiRequest('/api/auth/me', { token })
@@ -16,40 +24,42 @@ export function AuthProvider({ children }) {
         setSubscription(data.subscription);
       })
       .catch(() => logout());
-  }, [token]);
+  }, [logout, token]);
 
-  function saveSession(data) {
+  const saveSession = useCallback((data) => {
     localStorage.setItem('extensio_token', data.token);
     setToken(data.token);
     setUser(data.user);
     if (data.subscription !== undefined) setSubscription(data.subscription);
-  }
+  }, []);
 
-  async function login(email, password) {
+  const login = useCallback(async (email, password) => {
     saveSession(await apiRequest('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }));
-  }
+  }, [saveSession]);
 
-  async function register(name, email, password) {
+  const register = useCallback(async (name, email, password) => {
     saveSession(await apiRequest('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name, email, password }),
     }));
-  }
+  }, [saveSession]);
 
-  async function acceptOAuthToken(oauthToken) {
+  const acceptOAuthToken = useCallback(async (oauthToken) => {
     const data = await apiRequest('/api/auth/me', { token: oauthToken });
     saveSession({ token: oauthToken, user: data.user, subscription: data.subscription });
-  }
+  }, [saveSession]);
 
-  function logout() {
-    localStorage.removeItem('extensio_token');
-    setToken(null);
-    setUser(null);
-    setSubscription(null);
-  }
+  const updateProfile = useCallback(async (profile) => {
+    const data = await apiRequest('/api/auth/me', {
+      token,
+      method: 'PATCH',
+      body: JSON.stringify(profile),
+    });
+    saveSession({ token: data.token, user: data.user });
+  }, [saveSession, token]);
 
   const value = useMemo(() => ({
     token,
@@ -59,8 +69,9 @@ export function AuthProvider({ children }) {
     login,
     register,
     acceptOAuthToken,
+    updateProfile,
     logout,
-  }), [token, user, subscription]);
+  }), [acceptOAuthToken, login, logout, register, subscription, token, updateProfile, user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
