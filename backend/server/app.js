@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
@@ -10,6 +11,8 @@ import extensionRoutes from './routes/extension.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware.js';
+import { validateRuntimeEnv } from './config/env.js';
+import { logger } from './services/logger.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,7 +29,12 @@ export function createApp() {
       .filter(Boolean),
   ]);
 
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+  app.disable('x-powered-by');
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false,
+  }));
+  app.use(compression());
   app.use(cors({
     origin(origin, callback) {
       if (!origin || allowedOrigins.has(origin)) {
@@ -39,7 +47,7 @@ export function createApp() {
     credentials: true,
   }));
   app.use(express.json({ limit: '1mb' }));
-  app.use(morgan('dev'));
+  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
   app.use(rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 150,
@@ -48,7 +56,17 @@ export function createApp() {
   }));
 
   app.use('/downloads', express.static(path.join(backendRoot, 'storage', 'zips')));
-  app.get('/health', (req, res) => res.json({ ok: true, service: 'extensio-api' }));
+  app.get('/health', (req, res) => {
+    const runtime = validateRuntimeEnv();
+    res.status(runtime.ok ? 200 : 503).json({
+      ok: runtime.ok,
+      service: 'extensio-api',
+      environment: process.env.NODE_ENV || 'development',
+      warnings: runtime.warnings,
+      errors: runtime.errors,
+      uptime: process.uptime(),
+    });
+  });
 
   app.use('/api/auth', authRoutes);
   app.use('/api/extensions', extensionRoutes);
@@ -58,5 +76,6 @@ export function createApp() {
   app.use(notFoundHandler);
   app.use(errorHandler);
 
+  logger.info('Express app configured', { environment: process.env.NODE_ENV || 'development' });
   return app;
 }

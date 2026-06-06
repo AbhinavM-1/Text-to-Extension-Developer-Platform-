@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { logger } from '../services/logger.service.js';
 
 export async function connectDatabase() {
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/extensio_ai';
@@ -7,9 +8,9 @@ export async function connectDatabase() {
 
   try {
     await mongoose.connect(uri);
-    console.log('MongoDB connected');
+    logger.info('MongoDB connected');
   } catch (error) {
-    console.error('MongoDB connection failed:', error.message);
+    logger.error('MongoDB connection failed', { error: error.message });
     throw error;
   }
 }
