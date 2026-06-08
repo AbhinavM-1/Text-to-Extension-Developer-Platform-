@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -15,6 +16,7 @@ import {
   History,
   Landmark,
   LayoutDashboard,
+  LogOut,
   Menu,
   Moon,
   Plus,
@@ -75,7 +77,8 @@ const navItems = [
 ];
 
 export default function Dashboard() {
-  const { token, subscription, setSubscription, user, updateProfile } = useAuth();
+  const { token, subscription, setSubscription, user, updateProfile, logout } = useAuth();
+  const navigate = useNavigate();
   const [extensions, setExtensions] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [activePage, setActivePage] = useState('Dashboard');
@@ -232,6 +235,12 @@ export default function Dashboard() {
     toast.success(`Payment verified: ${verified.receipt.reference}`);
   }
 
+  function handleLogout() {
+    logout();
+    toast.success('Logged out');
+    navigate('/login', { replace: true });
+  }
+
   return (
     <Layout>
       <div className="min-h-screen bg-[#030712] text-[#F9FAFB]">
@@ -271,7 +280,7 @@ export default function Dashboard() {
           </aside>
 
           <main className="min-w-0 flex-1">
-            <TopNav user={user} subscription={subscription} search={search} setSearch={setSearch} onSearch={() => { loadExtensions(search); setActivePage('My Extensions'); }} onCommand={() => setCommandOpen(true)} />
+            <TopNav user={user} subscription={subscription} search={search} setSearch={setSearch} onSearch={() => { loadExtensions(search); setActivePage('My Extensions'); }} onCommand={() => setCommandOpen(true)} onLogout={handleLogout} />
 
             <AnimatePresence mode="wait">
               <motion.div key={activePage} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.18 }} className={clsx('mx-auto max-w-7xl px-4 lg:px-8', activePage === 'Billing' ? 'py-3 xl:h-[calc(100vh-73px)] xl:overflow-hidden' : 'py-6')}>
@@ -720,7 +729,7 @@ function PaymentGatewayNotice({ paymentMethod }) {
   );
 }
 
-function TopNav({ user, subscription, search, setSearch, onSearch, onCommand }) {
+function TopNav({ user, subscription, search, setSearch, onSearch, onCommand, onLogout }) {
   return (
     <header className="sticky top-0 z-30 border-b border-[#1F2937] bg-[#030712]/85 px-4 py-3 backdrop-blur-xl lg:px-8">
       <div className="mx-auto flex max-w-7xl items-center gap-3">
@@ -735,6 +744,15 @@ function TopNav({ user, subscription, search, setSearch, onSearch, onCommand }) 
         <button className="rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] hover:text-[#00E599]"><Moon size={18} /></button>
         <span className="rounded-full bg-[#00E599]/10 px-3 py-2 text-xs font-black uppercase text-[#00E599]">{subscription?.plan || 'free'}</span>
         <div className="grid h-10 w-10 place-items-center rounded-xl premium-gradient font-black text-[#030712]">{user?.name?.[0] || 'U'}</div>
+        <button
+          type="button"
+          onClick={onLogout}
+          className="inline-flex items-center gap-2 rounded-xl border border-[#1F2937] bg-[#111827] px-3 py-2 text-sm font-black text-[#F9FAFB] transition hover:border-red-400/50 hover:bg-red-500/10 hover:text-red-200"
+          title="Log out"
+        >
+          <LogOut size={16} />
+          <span className="hidden xl:inline">Logout</span>
+        </button>
       </div>
     </header>
   );
