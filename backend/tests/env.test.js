@@ -36,3 +36,15 @@ test('runtime env rejects incomplete Razorpay credentials', () => {
   assert.equal(result.ok, false);
   assert.ok(result.errors.some(error => error.includes('RAZORPAY_KEY_ID')));
 });
+
+test('runtime env warns when Razorpay webhook secret is missing', () => {
+  const result = validateRuntimeEnv({
+    NODE_ENV: 'development',
+    JWT_SECRET: 'a-secure-development-secret-value',
+    RAZORPAY_KEY_ID: 'rzp_test_123',
+    RAZORPAY_KEY_SECRET: 'razorpay-secret-value',
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.warnings.some(warning => warning.includes('RAZORPAY_WEBHOOK_SECRET')));
+});

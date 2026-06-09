@@ -32,6 +32,10 @@ export function validateRuntimeEnv(env = process.env) {
     errors.push('Both RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be configured together');
   }
 
+  if (env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET && !env.RAZORPAY_WEBHOOK_SECRET) {
+    warnings.push('RAZORPAY_WEBHOOK_SECRET is missing; checkout verification works, but webhook recovery is disabled');
+  }
+
   return { ok: errors.length === 0, errors, warnings };
 }
 

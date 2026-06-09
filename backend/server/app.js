@@ -22,7 +22,11 @@ export function createApp() {
   const app = express();
   const allowedOrigins = new Set([
     'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
     'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
     ...(process.env.CLIENT_ORIGIN || '')
       .split(',')
       .map(origin => origin.trim())
@@ -46,6 +50,7 @@ export function createApp() {
     },
     credentials: true,
   }));
+  app.use('/api/subscriptions/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
   app.use(rateLimit({

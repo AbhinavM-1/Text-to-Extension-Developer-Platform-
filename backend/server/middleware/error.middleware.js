@@ -5,15 +5,17 @@ export function notFoundHandler(req, res) {
 }
 
 export function errorHandler(error, req, res, next) {
-  const status = error.status || 500;
-  const message = status === 500 ? 'Unexpected server error' : error.message;
-  if (status === 500) {
-    logger.error('Unhandled API error', {
-      method: req.method,
-      path: req.originalUrl,
-      error: error.message,
-      stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
-    });
-  }
+  const status = error.status || error.statusCode || 500;
+  const isPaymentRoute = req.originalUrl?.startsWith('/api/subscriptions');
+  const message = status === 500 && !isPaymentRoute ? 'Unexpected server error' : error.message;
+
+  logger[status >= 500 ? 'error' : 'warn']('API request failed', {
+    method: req.method,
+    path: req.originalUrl,
+    status,
+    error: error.message,
+    stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+  });
+
   res.status(status).json({ message, details: error.details });
 }
