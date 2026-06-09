@@ -65,3 +65,105 @@ select {
     linear-gradient(260deg, rgba(20, 184, 166, 0.12), transparent 34%),
     #030712;
 }
+
+.dashboard-content {
+  max-width: min(96rem, 100%);
+}
+
+.theme-light {
+  color: #0f172a;
+  background: #eef6f4;
+}
+
+.theme-light body {
+  color: #0f172a;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(0, 229, 153, 0.2), transparent 32rem),
+    linear-gradient(135deg, #f8fafc 0%, #ecfeff 45%, #f1f5f9 100%);
+}
+
+.theme-light .glass-panel {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
+}
+
+.theme-light header,
+.theme-light aside {
+  background-color: rgba(248, 250, 252, 0.9) !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+}
+
+.theme-light input,
+.theme-light textarea {
+  color: #0f172a;
+}
+
+.theme-light .bg-\[\#030712\],
+.theme-light .bg-\[\#111827\] {
+  background-color: #ffffff !important;
+}
+
+.theme-light .border-\[\#1F2937\] {
+  border-color: rgba(148, 163, 184, 0.48) !important;
+}
+
+.theme-light .text-\[\#F9FAFB\],
+.theme-light .text-white {
+  color: #0f172a !important;
+}
+
+.theme-light .text-\[\#9CA3AF\],
+.theme-light .text-\[\#6B7280\] {
+  color: #475569 !important;
+}
+
+.theme-light .code-pane,
+.theme-light .font-mono {
+  color: #0f172a;
+}
+
+.theme-light .shadow-black\/40 {
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.16) !important;
+}
+
+.theme-light .billing-plan-card {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: rgba(148, 163, 184, 0.5) !important;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+}
+
+.theme-light .billing-plan-card-selected {
+  background: linear-gradient(180deg, rgba(0, 229, 153, 0.16), rgba(255, 255, 255, 0.96)) !important;
+  border-color: #00c985 !important;
+  box-shadow: 0 24px 70px rgba(0, 201, 133, 0.16);
+}
+
+.theme-light .billing-feature {
+  color: #334155 !important;
+}
+
+.theme-light .billing-plan-action {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(148, 163, 184, 0.5) !important;
+}
+
+.theme-light .billing-plan-action-current {
+  background: #e2e8f0 !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light .billing-plan-card-selected .billing-plan-action:not(.billing-plan-action-current) {
+  background: linear-gradient(135deg, #00e599, #14b8a6) !important;
+  color: #030712 !important;
+  border-color: transparent !important;
+}
+
+.theme-dark body {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(0, 229, 153, 0.14), transparent 32rem),
+    linear-gradient(135deg, #030712 0%, #07111f 45%, #030712 100%);
+}

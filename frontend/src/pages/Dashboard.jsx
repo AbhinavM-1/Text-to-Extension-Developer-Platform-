@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -27,8 +27,10 @@ import {
   ShieldCheck,
   Smartphone,
   Sparkles,
+  Sun,
   Trash2,
   Upload,
+  UserCircle,
   WandSparkles,
   Zap,
 } from 'lucide-react';
@@ -56,16 +58,6 @@ const generationSteps = [
   'Ready For Download...',
 ];
 
-const analyticsData = [
-  { day: 'Mon', generations: 3, downloads: 2 },
-  { day: 'Tue', generations: 5, downloads: 4 },
-  { day: 'Wed', generations: 2, downloads: 3 },
-  { day: 'Thu', generations: 7, downloads: 5 },
-  { day: 'Fri', generations: 4, downloads: 6 },
-  { day: 'Sat', generations: 8, downloads: 7 },
-  { day: 'Sun', generations: 6, downloads: 8 },
-];
-
 const navItems = [
   ['Dashboard', LayoutDashboard],
   ['New Extension', Plus],
@@ -89,9 +81,25 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [commandOpen, setCommandOpen] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
+  const [payments, setPayments] = useState([]);
+  const [paymentConfig, setPaymentConfig] = useState(null);
+  const [theme, setTheme] = useState(() => localStorage.getItem('extensio-theme') || 'dark');
 
   const selected = useMemo(() => extensions.find(item => item._id === selectedId) || extensions[0], [extensions, selectedId]);
   const storageKb = Math.max(1, Math.round(JSON.stringify(extensions).length / 1024));
+  const notifications = useMemo(() => {
+    const extensionItems = extensions.slice(0, 2).map(item => ({
+      title: item.name,
+      description: 'Extension generated and ready to manage',
+      page: 'My Extensions',
+    }));
+    const paymentItems = payments.slice(0, 2).map(item => ({
+      title: `${item.plan} ${item.status}`,
+      description: `Payment ${item.status} for ${item.billingCycle} billing`,
+      page: 'Billing',
+    }));
+    return [...paymentItems, ...extensionItems].slice(0, 4);
+  }, [extensions, payments]);
 
   const loadExtensions = useCallback(async (q = '') => {
     const data = await apiRequest(`/api/extensions${q ? `?search=${encodeURIComponent(q)}` : ''}`, { token });
@@ -100,10 +108,22 @@ export default function Dashboard() {
     setSelectedId(current => current || items[0]?._id || '');
   }, [token]);
 
+  const loadPayments = useCallback(async () => {
+    const data = await apiRequest('/api/subscriptions/payments', { token });
+    setPayments(data.items || []);
+  }, [token]);
+
+  const loadPaymentConfig = useCallback(async () => {
+    const data = await apiRequest('/api/subscriptions/payment-config', { token });
+    setPaymentConfig(data);
+  }, [token]);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadExtensions();
-  }, [loadExtensions]);
+    loadPayments().catch(() => {});
+    loadPaymentConfig().catch(() => {});
+  }, [loadExtensions, loadPaymentConfig, loadPayments]);
 
   useEffect(() => {
     const handler = event => {
@@ -115,6 +135,14 @@ export default function Dashboard() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  useEffect(() => {
+    const isLight = theme === 'light';
+    document.documentElement.classList.remove('light-theme');
+    document.documentElement.classList.toggle('theme-light', isLight);
+    document.documentElement.classList.toggle('theme-dark', !isLight);
+    localStorage.setItem('extensio-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!loading) return undefined;
@@ -201,6 +229,12 @@ export default function Dashboard() {
       return;
     }
 
+    const config = await apiRequest('/api/subscriptions/payment-config', { token });
+    setPaymentConfig(config);
+    if (!config.configured) {
+      throw new Error(config.message || 'Razorpay is not configured yet.');
+    }
+
     await loadRazorpayCheckout();
 
     const orderData = await apiRequest('/api/subscriptions/create-order', {
@@ -225,6 +259,7 @@ export default function Dashboard() {
         plan,
         billingCycle,
         paymentMethod,
+        checkoutSessionId: orderData.checkoutSessionId,
         razorpayOrderId: paymentResponse.razorpay_order_id,
         razorpayPaymentId: paymentResponse.razorpay_payment_id,
         razorpaySignature: paymentResponse.razorpay_signature,
@@ -232,6 +267,7 @@ export default function Dashboard() {
     });
 
     setSubscription(verified.subscription);
+    await loadPayments();
     toast.success(`Payment verified: ${verified.receipt.reference}`);
   }
 
@@ -244,7 +280,7 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="min-h-screen bg-[#030712] text-[#F9FAFB]">
-        <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} setPrompt={setPrompt} />
+        <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} setPrompt={setPrompt} setActivePage={setActivePage} />
 
         <div className="flex">
           <aside className={clsx('sticky top-0 hidden h-screen shrink-0 border-r border-[#1F2937] bg-[#030712]/95 p-4 transition-all lg:block', sidebarOpen ? 'w-72' : 'w-20')}>
@@ -270,20 +306,32 @@ export default function Dashboard() {
             </nav>
 
             {sidebarOpen && (
-              <div className="absolute bottom-4 left-4 right-4 rounded-2xl border border-[#1F2937] bg-[#111827] p-4">
+              <button type="button" onClick={() => setCommandOpen(true)} className="absolute bottom-4 left-4 right-4 rounded-2xl border border-[#1F2937] bg-[#111827] p-4 text-left transition hover:border-[#00E599]/60 hover:bg-[#00E599]/5">
                 <div className="flex items-center gap-2 text-sm font-black text-[#00E599]">
                   <Sparkles size={16} /> Prompt Library
                 </div>
                 <p className="mt-2 text-xs leading-5 text-[#9CA3AF]">Use Ctrl+K for global search, templates, and shortcuts.</p>
-              </div>
+              </button>
             )}
           </aside>
 
           <main className="min-w-0 flex-1">
-            <TopNav user={user} subscription={subscription} search={search} setSearch={setSearch} onSearch={() => { loadExtensions(search); setActivePage('My Extensions'); }} onCommand={() => setCommandOpen(true)} onLogout={handleLogout} />
+            <TopNav
+              user={user}
+              subscription={subscription}
+              notifications={notifications}
+              search={search}
+              setSearch={setSearch}
+              onSearch={() => { loadExtensions(search); setActivePage('My Extensions'); }}
+              onCommand={() => setCommandOpen(true)}
+              onNavigate={setActivePage}
+              onLogout={handleLogout}
+              theme={theme}
+              setTheme={setTheme}
+            />
 
             <AnimatePresence mode="wait">
-              <motion.div key={activePage} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.18 }} className={clsx('mx-auto max-w-7xl px-4 lg:px-8', activePage === 'Billing' ? 'py-3 xl:h-[calc(100vh-73px)] xl:overflow-hidden' : 'py-6')}>
+              <motion.div key={activePage} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.18 }} className="dashboard-content mx-auto w-full px-4 py-6 lg:px-6">
                 <DashboardPage
                   activePage={activePage}
                   extensions={extensions}
@@ -302,10 +350,14 @@ export default function Dashboard() {
                   edit={edit}
                   subscription={subscription}
                   choosePlan={choosePlan}
+                  payments={payments}
+                  paymentConfig={paymentConfig}
                   storageKb={storageKb}
                   setActivePage={setActivePage}
                   user={user}
                   updateProfile={updateProfile}
+                  theme={theme}
+                  setTheme={setTheme}
                 />
               </motion.div>
             </AnimatePresence>
@@ -334,10 +386,14 @@ function DashboardPage({
   edit,
   subscription,
   choosePlan,
+  payments,
+  paymentConfig,
   storageKb,
   setActivePage,
   user,
   updateProfile,
+  theme,
+  setTheme,
 }) {
   if (activePage === 'New Extension') {
     return (
@@ -384,9 +440,12 @@ function DashboardPage({
   if (activePage === 'Analytics') {
     return (
       <PageShell eyebrow="Analytics" title="Usage, downloads, and activity" subtitle="Track extension generation volume, downloads, and recent workspace events.">
-        <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-          <AnalyticsPanel />
-          <ActivityFeed extensions={extensions} />
+        <div className="space-y-6">
+          <AnalyticsSummary extensions={extensions} payments={payments} storageKb={storageKb} subscription={subscription} />
+          <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+            <AnalyticsPanel extensions={extensions} payments={payments} />
+            <ActivityFeed extensions={extensions} payments={payments} />
+          </div>
         </div>
       </PageShell>
     );
@@ -395,7 +454,7 @@ function DashboardPage({
   if (activePage === 'Billing') {
     return (
       <PageShell compact eyebrow="Billing" title="Payment dashboard and subscription plans" subtitle="Free users get 5 extension generations per day. Upgrade with UPI, card, or netbanking when you need production-scale usage.">
-        <BillingBoard subscription={subscription} choosePlan={choosePlan} />
+        <BillingBoard subscription={subscription} choosePlan={choosePlan} payments={payments} paymentConfig={paymentConfig} />
       </PageShell>
     );
   }
@@ -405,18 +464,7 @@ function DashboardPage({
       <PageShell eyebrow="Settings" title="Workspace and security controls" subtitle="Manage profile preferences, API provider settings, theme controls, and team-ready configuration.">
         <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <ProfileSettings user={user} updateProfile={updateProfile} />
-          <div className="grid gap-6">
-            {[
-              ['API Key Management', 'Connect Groq, Gemini, Razorpay, or OAuth providers through backend environment variables.'],
-              ['Theme Settings', 'Dark workspace is enabled with accessible contrast and responsive layouts.'],
-            ].map(([title, text]) => (
-              <motion.div key={title} whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
-                <Settings className="text-[#00E599]" size={20} />
-                <h3 className="mt-4 font-black">{title}</h3>
-                <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">{text}</p>
-              </motion.div>
-            ))}
-          </div>
+          <SettingsControls paymentConfig={paymentConfig} theme={theme} setTheme={setTheme} setActivePage={setActivePage} />
         </section>
       </PageShell>
     );
@@ -433,7 +481,7 @@ function DashboardPage({
       </section>
       <div className="grid gap-6 xl:grid-cols-[1fr_0.8fr]">
         <QuickActionCard setActivePage={setActivePage} />
-        <ActivityFeed extensions={extensions} />
+        <ActivityFeed extensions={extensions} payments={payments} />
       </div>
     </div>
   );
@@ -441,7 +489,7 @@ function DashboardPage({
 
 function PageShell({ eyebrow, title, subtitle, children, compact = false }) {
   return (
-    <div className={clsx(compact ? 'space-y-2 xl:h-full xl:overflow-hidden' : 'space-y-6')}>
+    <div className={clsx(compact ? 'space-y-4' : 'space-y-6')}>
       <section className={clsx('glass-panel', compact ? 'rounded-2xl p-3 lg:p-4' : 'rounded-3xl p-6 lg:p-8')}>
         <p className={clsx('font-black uppercase tracking-[0.24em] text-[#00E599]', compact ? 'text-[11px]' : 'text-sm')}>{eyebrow}</p>
         <h1 className={clsx('max-w-4xl font-black tracking-tight', compact ? 'mt-1 text-2xl lg:text-3xl' : 'mt-3 text-4xl lg:text-5xl')}>{title}</h1>
@@ -519,13 +567,30 @@ function loadRazorpayCheckout() {
 
 function openRazorpayCheckout({ keyId, order, plan, billingCycle, paymentMethod, user }) {
   return new Promise((resolve, reject) => {
-    const method = {
-      upi: paymentMethod === 'upi',
-      card: paymentMethod === 'card',
-      netbanking: paymentMethod === 'netbanking',
-      wallet: false,
-      emi: false,
-      paylater: false,
+    const displaySequences = {
+      upi: ['block.upi', 'block.cards', 'block.banks'],
+      card: ['block.cards', 'block.upi', 'block.banks'],
+      netbanking: ['block.banks', 'block.upi', 'block.cards'],
+    };
+    const display = {
+      blocks: {
+        upi: {
+          name: 'Pay using UPI',
+          instruments: [{ method: 'upi' }],
+        },
+        cards: {
+          name: 'Pay using Card',
+          instruments: [{ method: 'card' }],
+        },
+        banks: {
+          name: 'Pay using Netbanking',
+          instruments: [{ method: 'netbanking' }],
+        },
+      },
+      sequence: displaySequences[paymentMethod] || displaySequences.upi,
+      preferences: {
+        show_default_blocks: true,
+      },
     };
 
     const checkout = new window.Razorpay({
@@ -535,7 +600,12 @@ function openRazorpayCheckout({ keyId, order, plan, billingCycle, paymentMethod,
       name: 'Extensio.ai',
       description: `${billingPlans[plan].name} ${billingCycle} subscription`,
       order_id: order.id,
-      method,
+      method: {
+        upi: true,
+        card: true,
+        netbanking: true,
+        wallet: true,
+      },
       prefill: {
         name: user?.name || '',
         email: user?.email || '',
@@ -544,6 +614,9 @@ function openRazorpayCheckout({ keyId, order, plan, billingCycle, paymentMethod,
         plan,
         billingCycle,
         paymentMethod,
+      },
+      config: {
+        display,
       },
       theme: {
         color: '#00E599',
@@ -562,7 +635,7 @@ function openRazorpayCheckout({ keyId, order, plan, billingCycle, paymentMethod,
   });
 }
 
-function BillingBoard({ subscription, choosePlan }) {
+function BillingBoard({ subscription, choosePlan, payments = [], paymentConfig }) {
   const [selectedPlan, setSelectedPlan] = useState(subscription?.plan === 'premium' ? 'premium' : subscription?.plan === 'pro' ? 'pro' : 'pro');
   const [billingCycle, setBillingCycle] = useState(subscription?.billingCycle || 'monthly');
   const [paymentMethod, setPaymentMethod] = useState(subscription?.paymentMethod === 'card' || subscription?.paymentMethod === 'netbanking' ? subscription.paymentMethod : 'upi');
@@ -571,9 +644,16 @@ function BillingBoard({ subscription, choosePlan }) {
   const plan = billingPlans[selectedPlan];
   const amount = plan.price[billingCycle];
   const yearlySavings = selectedPlan === 'free' ? 0 : (plan.price.monthly * 12) - plan.price.yearly;
+  const paidPlanSelected = selectedPlan !== 'free';
+  const gatewayReady = Boolean(paymentConfig?.configured);
+  const checkoutDisabled = processing || currentPlan === selectedPlan || (paidPlanSelected && !gatewayReady);
 
   async function handleCheckout(event) {
     event.preventDefault();
+    if (paidPlanSelected && !gatewayReady) {
+      toast.error(paymentConfig?.message || 'Razorpay is not configured yet.');
+      return;
+    }
     setProcessing(true);
     try {
       await choosePlan(selectedPlan, billingCycle, selectedPlan === 'free' ? 'free' : paymentMethod);
@@ -585,8 +665,8 @@ function BillingBoard({ subscription, choosePlan }) {
   }
 
   return (
-    <div className="grid gap-2 xl:h-[calc(100%-105px)] xl:grid-cols-[1.2fr_0.8fr] xl:overflow-hidden">
-      <section className="flex flex-col gap-2 xl:min-h-0">
+    <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-[1.2fr_0.8fr]">
+      <section className="flex flex-col gap-4">
         <div className="glass-panel rounded-2xl p-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -603,7 +683,7 @@ function BillingBoard({ subscription, choosePlan }) {
           </div>
         </div>
 
-        <div className="grid flex-1 gap-2 lg:grid-cols-3">
+        <div className="grid min-w-0 gap-3 md:grid-cols-3">
           {Object.entries(billingPlans).map(([key, item]) => {
             const active = currentPlan === key;
             const selected = selectedPlan === key;
@@ -613,7 +693,7 @@ function BillingBoard({ subscription, choosePlan }) {
                 type="button"
                 whileHover={{ y: -2 }}
                 onClick={() => setSelectedPlan(key)}
-                className={clsx('relative flex h-full flex-col rounded-2xl border p-4 text-left transition', selected ? 'border-[#00E599] bg-[#00E599]/10 shadow-2xl shadow-emerald-500/10' : 'border-[#1F2937] bg-[#111827]/80 hover:border-[#00E599]/50')}
+                className={clsx('billing-plan-card relative flex h-full flex-col rounded-2xl border p-4 text-left transition', selected ? 'billing-plan-card-selected border-[#00E599] bg-[#00E599]/10 shadow-2xl shadow-emerald-500/10' : 'border-[#1F2937] bg-[#111827]/80 hover:border-[#00E599]/50')}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -627,13 +707,13 @@ function BillingBoard({ subscription, choosePlan }) {
                 <p className="mt-4 text-2xl font-black">₹{item.price[billingCycle].toLocaleString('en-IN')}<span className="text-xs text-[#9CA3AF]">/{billingCycle === 'yearly' ? 'yr' : 'mo'}</span></p>
                 <div className="mt-4 space-y-2">
                   {item.features.map(feature => (
-                    <p key={feature} className="flex items-center gap-2 text-xs text-[#D1D5DB]">
+                    <p key={feature} className="billing-feature flex items-center gap-2 text-xs text-[#D1D5DB]">
                       <ShieldCheck size={13} className="text-[#00E599]" />
                       {feature}
                     </p>
                   ))}
                 </div>
-                <span className={clsx('mb-3 mt-auto flex w-full items-center justify-center whitespace-nowrap rounded-xl px-3 py-2 text-xs font-black transition', active ? 'bg-[#1F2937] text-[#9CA3AF]' : selected ? 'premium-gradient text-[#030712]' : 'border border-[#1F2937] bg-[#030712] text-[#F9FAFB]')}>
+                <span className={clsx('billing-plan-action mb-3 mt-auto flex w-full items-center justify-center whitespace-nowrap rounded-xl px-3 py-2 text-xs font-black transition', active ? 'billing-plan-action-current bg-[#1F2937] text-[#9CA3AF]' : selected ? 'premium-gradient text-[#030712]' : 'border border-[#1F2937] bg-[#030712] text-[#F9FAFB]')}>
                   {active ? 'Current plan' : `Choose ${item.name}`}
                 </span>
               </motion.button>
@@ -643,7 +723,7 @@ function BillingBoard({ subscription, choosePlan }) {
 
       </section>
 
-      <section className="glass-panel rounded-2xl p-3 xl:min-h-0">
+      <section className="glass-panel rounded-2xl p-4 2xl:sticky 2xl:top-24">
         <div className="flex items-start justify-between gap-4">
           <div>
             <SectionHeader compact eyebrow="Checkout" title="Secure payment" />
@@ -654,8 +734,8 @@ function BillingBoard({ subscription, choosePlan }) {
           </span>
         </div>
 
-        <form onSubmit={handleCheckout} className="mt-2 space-y-1.5">
-          {selectedPlan !== 'free' && (
+        <form onSubmit={handleCheckout} className="mt-3 space-y-2.5">
+          {paidPlanSelected && (
             <>
               <div className="grid gap-2 sm:grid-cols-3">
                 {paymentMethods.map(method => {
@@ -671,48 +751,88 @@ function BillingBoard({ subscription, choosePlan }) {
               </div>
 
               <PaymentGatewayNotice paymentMethod={paymentMethod} />
+              {!gatewayReady && <PaymentSetupNotice message={paymentConfig?.message} />}
             </>
           )}
 
-          <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-2">
-            <div className="flex items-center justify-between text-xs">
+          <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-3">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-[#9CA3AF]">{plan.name} plan</span>
               <span className="font-black">₹{amount.toLocaleString('en-IN')}</span>
             </div>
-            <div className="mt-1.5 flex items-center justify-between text-xs">
+            <div className="mt-2 flex items-center justify-between text-sm">
               <span className="text-[#9CA3AF]">Billing cycle</span>
               <span className="font-black capitalize">{billingCycle}</span>
             </div>
             {yearlySavings > 0 && (
-              <div className="mt-1.5 flex items-center justify-between text-xs text-[#00E599]">
+              <div className="mt-2 flex items-center justify-between text-sm text-[#00E599]">
                 <span>Yearly savings</span>
                 <span className="font-black">₹{yearlySavings.toLocaleString('en-IN')}</span>
               </div>
             )}
-            <div className="mt-1.5 border-t border-[#1F2937] pt-1.5">
+            <div className="mt-3 border-t border-[#1F2937] pt-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-black">Total due today</span>
-                <span className="text-lg font-black">₹{amount.toLocaleString('en-IN')}</span>
+                <span className="text-base font-black">Total due today</span>
+                <span className="text-2xl font-black">₹{amount.toLocaleString('en-IN')}</span>
               </div>
-              <p className="mt-0.5 text-[10px] leading-4 text-[#9CA3AF]">Click checkout to open Razorpay. Payment credentials are handled securely by Razorpay, not stored in Extensio.ai.</p>
+              <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">Click checkout to open Razorpay. Payment credentials are handled securely by Razorpay, not stored in Extensio.ai.</p>
             </div>
           </div>
 
-          <button disabled={processing || currentPlan === selectedPlan} className="flex w-full items-center justify-center gap-2 rounded-xl premium-gradient px-4 py-2 text-base font-black text-[#030712] disabled:opacity-50">
+          <button disabled={checkoutDisabled} className="sticky bottom-4 z-10 flex w-full items-center justify-center gap-2 rounded-xl premium-gradient px-4 py-3 text-lg font-black text-[#030712] shadow-2xl shadow-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50">
             <ShieldCheck size={16} />
-            {currentPlan === selectedPlan ? 'Current plan active' : processing ? 'Processing payment...' : selectedPlan === 'free' ? 'Switch to Free' : `Pay ₹${amount.toLocaleString('en-IN')} securely`}
+            {currentPlan === selectedPlan
+              ? 'Current plan active'
+              : processing
+                ? 'Processing payment...'
+                : selectedPlan === 'free'
+                  ? 'Switch to Free'
+                  : gatewayReady
+                    ? `Pay ₹${amount.toLocaleString('en-IN')} securely`
+                    : 'Configure Razorpay to enable checkout'}
           </button>
+
+          <PaymentHistory payments={payments} />
         </form>
       </section>
     </div>
   );
 }
 
+function PaymentHistory({ payments }) {
+  const latest = payments.slice(0, 3);
+
+  return (
+    <div className="rounded-2xl border border-[#1F2937] bg-[#030712] p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-black">Payment history</p>
+        <span className="rounded-full bg-[#111827] px-2 py-1 text-[10px] font-black uppercase text-[#00E599]">Server verified</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {latest.length ? latest.map(payment => (
+          <div key={payment._id} className="flex items-center justify-between gap-3 rounded-xl border border-[#1F2937] bg-[#111827] px-3 py-2">
+            <div>
+              <p className="text-xs font-black uppercase">{payment.plan} / {payment.billingCycle}</p>
+              <p className="mt-0.5 text-[10px] text-[#9CA3AF]">{payment.razorpayPaymentId || payment.razorpayOrderId}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-black">₹{payment.amount.toLocaleString('en-IN')}</p>
+              <p className={clsx('mt-0.5 text-[10px] font-black uppercase', payment.status === 'paid' ? 'text-[#00E599]' : payment.status === 'failed' ? 'text-red-300' : 'text-[#9CA3AF]')}>{payment.status}</p>
+            </div>
+          </div>
+        )) : (
+          <p className="rounded-xl border border-dashed border-[#1F2937] px-3 py-4 text-center text-xs leading-5 text-[#9CA3AF]">No payments yet. Your verified Razorpay receipts will appear here.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PaymentGatewayNotice({ paymentMethod }) {
   const copy = {
-    upi: ['UPI Checkout', 'Razorpay will open a UPI checkout where the customer can scan, approve, or enter their UPI ID securely.'],
-    card: ['Card Checkout', 'Razorpay will collect card number, expiry, CVV, OTP/3DS, and network authentication securely.'],
-    netbanking: ['Netbanking Checkout', 'Razorpay will redirect the customer to their bank login and return only the verified payment result.'],
+    upi: ['UPI preferred', 'Razorpay will open checkout with UPI preferred and will also show other enabled methods if UPI is unavailable in test mode.'],
+    card: ['Card preferred', 'Razorpay will open checkout with cards preferred and will complete OTP/3DS securely inside Razorpay.'],
+    netbanking: ['Netbanking preferred', 'Razorpay will open checkout with netbanking preferred and return only the verified payment result.'],
   };
   const [title, text] = copy[paymentMethod] || copy.upi;
 
@@ -729,7 +849,46 @@ function PaymentGatewayNotice({ paymentMethod }) {
   );
 }
 
-function TopNav({ user, subscription, search, setSearch, onSearch, onCommand, onLogout }) {
+function PaymentSetupNotice({ message }) {
+  return (
+    <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3">
+      <div className="flex items-start gap-2">
+        <ShieldCheck size={15} className="mt-0.5 shrink-0 text-amber-300" />
+        <div>
+          <p className="text-sm font-black text-amber-100">Razorpay setup required</p>
+          <p className="mt-1 text-xs leading-5 text-amber-100/80">
+            {message || 'Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to backend/.env, then restart the backend.'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopNav({ user, subscription, notifications = [], search, setSearch, onSearch, onCommand, onNavigate, onLogout, theme, setTheme }) {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsSeen, setNotificationsSeen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const isLight = theme === 'light';
+  const notificationSignature = useMemo(() => notifications.map(item => `${item.title}:${item.description}`).join('|'), [notifications]);
+  const unreadCount = notificationsSeen ? 0 : notifications.length;
+
+  useEffect(() => {
+    setNotificationsSeen(false);
+  }, [notificationSignature]);
+
+  function goTo(page) {
+    onNavigate?.(page);
+    setNotificationsOpen(false);
+    setProfileOpen(false);
+  }
+
+  function toggleNotifications() {
+    setNotificationsOpen(value => !value);
+    setProfileOpen(false);
+    setNotificationsSeen(true);
+  }
+
   return (
     <header className="sticky top-0 z-30 border-b border-[#1F2937] bg-[#030712]/85 px-4 py-3 backdrop-blur-xl lg:px-8">
       <div className="mx-auto flex max-w-7xl items-center gap-3">
@@ -740,10 +899,78 @@ function TopNav({ user, subscription, search, setSearch, onSearch, onCommand, on
           <Search size={16} className="text-[#9CA3AF]" />
           <input value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => event.key === 'Enter' && onSearch()} placeholder="Search extensions, prompts, files..." className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#6B7280]" />
         </div>
-        <button className="rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] hover:text-[#00E599]"><Bell size={18} /></button>
-        <button className="rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] hover:text-[#00E599]"><Moon size={18} /></button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={toggleNotifications}
+            className="relative rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] transition hover:border-[#00E599]/50 hover:text-[#00E599]"
+            aria-label="Open notifications"
+          >
+            <Bell size={18} />
+            {unreadCount > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-black text-white">{unreadCount}</span>}
+          </button>
+          <AnimatePresence>
+            {notificationsOpen && (
+              <motion.div initial={{ opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.98 }} className="absolute right-0 mt-3 w-80 rounded-2xl border border-[#1F2937] bg-[#111827] p-3 shadow-2xl shadow-black/40">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-black">Notifications</p>
+                  <div className="flex items-center gap-3">
+                    {notifications.length > 0 && <button type="button" onClick={() => setNotificationsSeen(true)} className="text-xs font-bold text-[#00E599]">Mark read</button>}
+                    <button type="button" onClick={() => setNotificationsOpen(false)} className="text-xs font-bold text-[#9CA3AF] hover:text-[#00E599]">Close</button>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {notifications.length ? notifications.map((item, index) => (
+                    <button key={`${item.title}-${index}`} type="button" onClick={() => goTo(item.page)} className="w-full rounded-xl border border-[#1F2937] bg-[#030712] px-3 py-2 text-left transition hover:border-[#00E599]/50">
+                      <p className="text-sm font-black">{item.title}</p>
+                      <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{item.description}</p>
+                    </button>
+                  )) : (
+                    <p className="rounded-xl border border-dashed border-[#1F2937] px-3 py-4 text-center text-xs leading-5 text-[#9CA3AF]">No notifications yet. New generations and payment updates will appear here.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <button
+          type="button"
+          onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+          className="rounded-xl border border-[#1F2937] bg-[#111827] p-2 text-[#9CA3AF] transition hover:border-[#00E599]/50 hover:text-[#00E599]"
+          title={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
+          aria-label={isLight ? 'Switch to dark mode' : 'Switch to light mode'}
+        >
+          {isLight ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
         <span className="rounded-full bg-[#00E599]/10 px-3 py-2 text-xs font-black uppercase text-[#00E599]">{subscription?.plan || 'free'}</span>
-        <div className="grid h-10 w-10 place-items-center rounded-xl premium-gradient font-black text-[#030712]">{user?.name?.[0] || 'U'}</div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => { setProfileOpen(value => !value); setNotificationsOpen(false); }}
+            className="grid h-10 w-10 place-items-center rounded-xl premium-gradient font-black text-[#030712] transition hover:scale-105"
+            aria-label="Open profile menu"
+          >
+            {user?.name?.[0] || 'U'}
+          </button>
+          <AnimatePresence>
+            {profileOpen && (
+              <motion.div initial={{ opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.98 }} className="absolute right-0 mt-3 w-72 rounded-2xl border border-[#1F2937] bg-[#111827] p-3 shadow-2xl shadow-black/40">
+                <div className="flex items-center gap-3 rounded-xl bg-[#030712] p-3">
+                  <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#00E599]/10 text-[#00E599]"><UserCircle size={22} /></span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black">{user?.name || 'User'}</p>
+                    <p className="truncate text-xs text-[#9CA3AF]">{user?.email || 'Signed in'}</p>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  <button type="button" onClick={() => goTo('Settings')} className="rounded-xl border border-[#1F2937] px-3 py-2 text-left text-sm font-bold transition hover:border-[#00E599]/50 hover:text-[#00E599]">Profile settings</button>
+                  <button type="button" onClick={() => goTo('Billing')} className="rounded-xl border border-[#1F2937] px-3 py-2 text-left text-sm font-bold transition hover:border-[#00E599]/50 hover:text-[#00E599]">Billing and plan</button>
+                  <button type="button" onClick={onLogout} className="rounded-xl border border-red-400/30 px-3 py-2 text-left text-sm font-black text-red-200 transition hover:bg-red-500/10">Logout</button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
         <button
           type="button"
           onClick={onLogout}
@@ -898,47 +1125,244 @@ function SelectedExtension({ selected, editPrompt, setEditPrompt, edit, loading 
   );
 }
 
-function AnalyticsPanel() {
+function getWeekKey(date) {
+  return new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date);
+}
+
+function buildAnalyticsData(extensions, payments) {
+  const today = new Date();
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    return { date, day: getWeekKey(date), generations: 0, downloads: 0, payments: 0 };
+  });
+  const sameDay = (left, right) => left.toDateString() === right.toDateString();
+
+  extensions.forEach(item => {
+    const created = item.createdAt ? new Date(item.createdAt) : null;
+    const target = created && days.find(day => sameDay(day.date, created));
+    if (target) {
+      target.generations += 1;
+      target.downloads += Math.max(1, item.versionHistory?.length || 1);
+    }
+
+    (item.versionHistory || []).forEach(version => {
+      const versionDate = version.createdAt ? new Date(version.createdAt) : null;
+      const versionTarget = versionDate && days.find(day => sameDay(day.date, versionDate));
+      if (versionTarget && version.editRequest) versionTarget.generations += 1;
+    });
+  });
+
+  payments.forEach(payment => {
+    const created = payment.createdAt ? new Date(payment.createdAt) : null;
+    const target = created && days.find(day => sameDay(day.date, created));
+    if (target && payment.status === 'paid') target.payments += 1;
+  });
+
+  return days.map(({ date, ...item }) => item);
+}
+
+function AnalyticsSummary({ extensions, payments, storageKb, subscription }) {
+  const paidPayments = payments.filter(payment => payment.status === 'paid');
+  const totalVersions = extensions.reduce((sum, item) => sum + Math.max(1, item.versionHistory?.length || 1), 0);
+  const stats = [
+    ['Extensions', extensions.length, Boxes],
+    ['Version Events', totalVersions, Activity],
+    ['Paid Receipts', paidPayments.length, Receipt],
+    ['Storage Used', `${storageKb} KB`, FileArchive],
+    ['Plan', (subscription?.plan || 'free').toUpperCase(), Zap],
+  ];
+
+  return (
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      {stats.map(([label, value, Icon]) => (
+        <motion.div key={label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel rounded-2xl p-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#00E599]/10 text-[#00E599]"><Icon size={18} /></span>
+            <span className="rounded-full bg-[#111827] px-2 py-1 text-[10px] font-black uppercase text-[#9CA3AF]">Live</span>
+          </div>
+          <p className="mt-4 text-2xl font-black">{value}</p>
+          <p className="mt-1 text-xs font-bold text-[#9CA3AF]">{label}</p>
+        </motion.div>
+      ))}
+    </section>
+  );
+}
+
+function AnalyticsPanel({ extensions, payments }) {
+  const data = useMemo(() => buildAnalyticsData(extensions, payments), [extensions, payments]);
+  const hasData = data.some(item => item.generations || item.downloads || item.payments);
+
   return (
     <section className="glass-panel rounded-2xl p-5">
       <SectionHeader eyebrow="Analytics" title="Usage statistics" />
       <div className="mt-5 h-72">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={analyticsData}>
-            <defs>
-              <linearGradient id="gen" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#00E599" stopOpacity={0.5} />
-                <stop offset="95%" stopColor="#00E599" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" />
-            <XAxis dataKey="day" stroke="#9CA3AF" />
-            <YAxis stroke="#9CA3AF" />
-            <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1F2937', color: '#F9FAFB' }} />
-            <Area type="monotone" dataKey="generations" stroke="#00E599" fill="url(#gen)" strokeWidth={3} />
-          </AreaChart>
-        </ResponsiveContainer>
+        {hasData ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data}>
+              <defs>
+                <linearGradient id="gen" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#00E599" stopOpacity={0.5} />
+                  <stop offset="95%" stopColor="#00E599" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="dl" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#38BDF8" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#38BDF8" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="#1F2937" strokeDasharray="3 3" />
+              <XAxis dataKey="day" stroke="#9CA3AF" />
+              <YAxis allowDecimals={false} stroke="#9CA3AF" />
+              <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1F2937', borderRadius: 14, color: '#F9FAFB' }} />
+              <Area type="monotone" dataKey="downloads" name="Download actions" stroke="#38BDF8" fill="url(#dl)" strokeWidth={2} />
+              <Area type="monotone" dataKey="generations" name="Generations and edits" stroke="#00E599" fill="url(#gen)" strokeWidth={3} />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="grid h-full place-items-center rounded-2xl border border-dashed border-[#1F2937] bg-[#030712] text-center">
+            <div>
+              <Activity className="mx-auto text-[#00E599]" size={28} />
+              <p className="mt-3 font-black">No analytics yet</p>
+              <p className="mt-1 text-sm text-[#9CA3AF]">Generate or edit an extension to start tracking real usage.</p>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function ActivityFeed({ extensions }) {
+function ActivityFeed({ extensions, payments = [] }) {
+  const extensionEvents = extensions.flatMap(item => {
+    const events = [{
+      id: `${item._id}-created`,
+      title: item.name,
+      description: 'Extension generated and saved',
+      createdAt: item.createdAt || item.updatedAt,
+      icon: Boxes,
+    }];
+    (item.versionHistory || []).filter(version => version.editRequest).forEach(version => {
+      events.push({
+        id: `${item._id}-${version.version}`,
+        title: `${item.name} v${version.version}`,
+        description: version.prompt || 'Prompt edit applied',
+        createdAt: version.createdAt,
+        icon: History,
+      });
+    });
+    return events;
+  });
+  const paymentEvents = payments.map(payment => ({
+    id: payment._id,
+    title: `${payment.plan} payment ${payment.status}`,
+    description: `₹${payment.amount?.toLocaleString('en-IN') || 0} via ${payment.paymentMethod}`,
+    createdAt: payment.createdAt,
+    icon: Receipt,
+  }));
+  const events = [...paymentEvents, ...extensionEvents]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 8);
+
   return (
     <section className="glass-panel rounded-2xl p-5">
       <SectionHeader eyebrow="Activity" title="Recent activity" />
       <div className="mt-5 space-y-3">
-        {(extensions.slice(0, 5).length ? extensions.slice(0, 5) : [{ name: 'No activity yet', prompt: 'Generate an extension to start your feed.' }]).map((item, index) => (
-          <div key={`${item.name}-${index}`} className="flex gap-3 rounded-xl border border-[#1F2937] bg-[#030712] p-3">
-            <Activity size={18} className="mt-1 text-[#00E599]" />
+        {(events.length ? events : [{ id: 'empty', title: 'No activity yet', description: 'Generate an extension to start your feed.', icon: Activity }]).map(item => {
+          const Icon = item.icon || Activity;
+          return (
+          <div key={item.id} className="flex gap-3 rounded-xl border border-[#1F2937] bg-[#030712] p-3">
+            <Icon size={18} className="mt-1 text-[#00E599]" />
             <div>
-              <p className="text-sm font-black">{item.name}</p>
-              <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{item.prompt}</p>
+              <p className="text-sm font-black capitalize">{item.title}</p>
+              <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{item.description}</p>
+              {item.createdAt && <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#6B7280]">{new Date(item.createdAt).toLocaleString()}</p>}
             </div>
           </div>
-        ))}
+        );})}
       </div>
     </section>
+  );
+}
+
+function SettingsControls({ paymentConfig, theme, setTheme, setActivePage }) {
+  const providers = [
+    ['Groq AI', 'Connected through GROQ_API_KEY in backend/.env', 'Env managed'],
+    ['Gemini AI', 'Optional fallback through GEMINI_API_KEY', 'Optional'],
+    ['Razorpay', paymentConfig?.configured ? 'Checkout keys are configured' : paymentConfig?.message || 'Payment keys are not configured', paymentConfig?.configured ? 'Ready' : 'Needs setup'],
+    ['OAuth', 'Google/GitHub/Microsoft require client credentials', 'Configurable'],
+  ];
+
+  async function copyEnvTemplate() {
+    const template = [
+      'GROQ_API_KEY=',
+      'GEMINI_API_KEY=',
+      'RAZORPAY_KEY_ID=',
+      'RAZORPAY_KEY_SECRET=',
+      'RAZORPAY_WEBHOOK_SECRET=',
+      'GOOGLE_CLIENT_ID=',
+      'GOOGLE_CLIENT_SECRET=',
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(template);
+      toast.success('Environment template copied');
+    } catch {
+      toast.error('Clipboard blocked. Open backend/.env.example to copy the keys.');
+    }
+  }
+
+  return (
+    <div className="grid gap-6">
+      <motion.div whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
+        <Settings className="text-[#00E599]" size={20} />
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="font-black">API Key Management</h3>
+            <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">Track provider readiness and jump to payment setup when keys are missing.</p>
+          </div>
+          <button type="button" onClick={copyEnvTemplate} className="rounded-xl border border-[#1F2937] px-3 py-2 text-xs font-black transition hover:border-[#00E599]/60 hover:text-[#00E599]">
+            Copy env keys
+          </button>
+        </div>
+        <div className="mt-4 space-y-2">
+          {providers.map(([name, description, status]) => (
+            <div key={name} className="rounded-xl border border-[#1F2937] bg-[#030712] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-black">{name}</p>
+                <span className={clsx('rounded-full px-2 py-1 text-[10px] font-black uppercase', status === 'Ready' || status === 'Env managed' ? 'bg-[#00E599]/10 text-[#00E599]' : 'bg-amber-500/10 text-amber-300')}>{status}</span>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{description}</p>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={() => setActivePage('Billing')} className="mt-4 w-full rounded-xl premium-gradient px-4 py-3 font-black text-[#030712]">
+          Open payment setup
+        </button>
+      </motion.div>
+
+      <motion.div whileHover={{ y: -4 }} className="glass-panel rounded-2xl p-5">
+        <Settings className="text-[#00E599]" size={20} />
+        <h3 className="mt-4 font-black">Theme Settings</h3>
+        <p className="mt-2 text-sm leading-6 text-[#9CA3AF]">Switch workspace appearance instantly. Your choice is saved on this browser.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {[
+            ['dark', 'Dark workspace', Moon],
+            ['light', 'Light workspace', Sun],
+          ].map(([mode, label, Icon]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setTheme(mode)}
+              className={clsx('rounded-2xl border p-4 text-left transition', theme === mode ? 'border-[#00E599] bg-[#00E599]/10' : 'border-[#1F2937] bg-[#030712] hover:border-[#00E599]/50')}
+            >
+              <Icon size={20} className="text-[#00E599]" />
+              <p className="mt-3 text-sm font-black">{label}</p>
+              <p className="mt-1 text-xs text-[#9CA3AF]">{theme === mode ? 'Active now' : 'Click to activate'}</p>
+            </button>
+          ))}
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -983,7 +1407,108 @@ function ProfileSettings({ user, updateProfile }) {
   );
 }
 
-function CommandPalette({ open, onClose, setPrompt }) {
+function CommandPalette({ open, onClose, setPrompt, setActivePage }) {
+  const [query, setQuery] = useState('');
+  const fileInputRef = useRef(null);
+
+  const actions = useMemo(() => [
+    ...promptSuggestions.map(suggestion => ({
+      id: suggestion,
+      label: suggestion,
+      description: 'Use this prompt template',
+      Icon: Sparkles,
+      run: () => {
+        setPrompt(suggestion);
+        setActivePage('New Extension');
+        onClose();
+      },
+    })),
+    {
+      id: 'new-extension',
+      label: 'Open New Extension',
+      description: 'Go to the prompt workspace',
+      Icon: Plus,
+      run: () => {
+        setActivePage('New Extension');
+        onClose();
+      },
+    },
+    {
+      id: 'my-extensions',
+      label: 'Open My Extensions',
+      description: 'Manage generated extension ZIPs',
+      Icon: Boxes,
+      run: () => {
+        setActivePage('My Extensions');
+        onClose();
+      },
+    },
+    {
+      id: 'analytics',
+      label: 'Open Analytics',
+      description: 'View usage and activity',
+      Icon: BarChart3,
+      run: () => {
+        setActivePage('Analytics');
+        onClose();
+      },
+    },
+    {
+      id: 'billing',
+      label: 'View Billing Plans',
+      description: 'Upgrade plans and payment settings',
+      Icon: CreditCard,
+      run: () => {
+        setActivePage('Billing');
+        onClose();
+      },
+    },
+    {
+      id: 'settings',
+      label: 'Open Settings',
+      description: 'Manage profile and workspace controls',
+      Icon: Settings,
+      run: () => {
+        setActivePage('Settings');
+        onClose();
+      },
+    },
+    {
+      id: 'import-prompt',
+      label: 'Import Prompt File',
+      description: 'Load a .txt or .md prompt into the generator',
+      Icon: Upload,
+      run: () => fileInputRef.current?.click(),
+    },
+  ], [onClose, setActivePage, setPrompt]);
+
+  const filteredActions = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return actions;
+    return actions.filter(action => `${action.label} ${action.description}`.toLowerCase().includes(normalized));
+  }, [actions, query]);
+
+  async function handlePromptImport(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const promptText = text.trim();
+      if (!promptText) {
+        toast.error('Prompt file is empty');
+        return;
+      }
+      setPrompt(promptText.slice(0, 4000));
+      setActivePage('New Extension');
+      toast.success('Prompt imported');
+      onClose();
+    } catch (error) {
+      toast.error(error?.message || 'Could not import prompt file');
+    }
+  }
+
   return (
     <AnimatePresence>
       {open && (
@@ -991,20 +1516,21 @@ function CommandPalette({ open, onClose, setPrompt }) {
           <motion.div initial={{ y: -20, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: -20, scale: 0.98 }} className="mx-auto mt-20 max-w-2xl rounded-2xl border border-[#1F2937] bg-[#030712] p-4 shadow-2xl" onClick={event => event.stopPropagation()}>
             <div className="flex items-center gap-3 border-b border-[#1F2937] pb-3">
               <Command size={18} className="text-[#00E599]" />
-              <input autoFocus placeholder="Search commands, templates, shortcuts..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#6B7280]" />
+              <input value={query} onChange={event => setQuery(event.target.value)} autoFocus placeholder="Search commands, templates, shortcuts..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-[#6B7280]" />
             </div>
+            <input ref={fileInputRef} type="file" accept=".txt,.md,text/plain,text/markdown" className="hidden" onChange={handlePromptImport} />
             <div className="mt-3 space-y-2">
-              {promptSuggestions.map(suggestion => (
-                <button key={suggestion} onClick={() => { setPrompt(suggestion); onClose(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
-                  <Sparkles size={16} className="text-[#00E599]" /> {suggestion}
+              {filteredActions.length ? filteredActions.map(({ id, label, description, Icon, run }) => (
+                <button key={id} type="button" onClick={run} className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
+                  <Icon size={16} className="shrink-0 text-[#00E599]" />
+                  <span className="min-w-0">
+                    <span className="block truncate">{label}</span>
+                    <span className="block truncate text-xs font-medium text-[#6B7280]">{description}</span>
+                  </span>
                 </button>
-              ))}
-              <button className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
-                <Upload size={16} className="text-[#00E599]" /> Import existing extension ZIP
-              </button>
-              <button className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#D1D5DB] hover:bg-[#111827]">
-                <Copy size={16} className="text-[#00E599]" /> Export project JSON
-              </button>
+              )) : (
+                <p className="rounded-xl border border-dashed border-[#1F2937] px-3 py-4 text-center text-sm text-[#9CA3AF]">No matching command found.</p>
+              )}
             </div>
           </motion.div>
         </motion.div>
