@@ -5,6 +5,7 @@ import { normalizeFiles, validateExtensionFiles } from '../services/validator.se
 import { scanGeneratedFiles } from '../services/security.service.js';
 import { packageExtension } from '../services/zip.service.js';
 import { recordSuccessfulGeneration } from '../middleware/subscription.middleware.js';
+import { recordActivity } from '../services/activity.service.js';
 
 const MAX_PAGE_SIZE = 50;
 
@@ -57,6 +58,14 @@ export async function generateExtension(req, res, next) {
     extension.versionHistory[0].zipPath = zip.zipPath;
     extension.versionHistory[0].zipUrl = zip.zipUrl;
     await extension.save();
+    await recordSuccessfulGeneration(req);
+    await recordActivity({
+      user: req.user._id,
+      type: 'extension.generated',
+      title: extension.name,
+      description: 'Generated a new Chrome extension ZIP',
+      metadata: { extensionId: extension._id, version: 1 },
+    });
 
     res.status(201).json(extension);
   } catch (error) {
@@ -67,7 +76,7 @@ export async function generateExtension(req, res, next) {
 async function buildSafeGeneratedExtension(prompt) {
   let lastError;
 
-  if (isYoutubeAdBlockingPrompt(prompt)) {
+  if (isYoutubeAdBlockingPrompt(prompt) || isImageReplacementPrompt(prompt)) {
     return validateGeneratedPayload(localTemplatePayload(prompt), prompt);
   }
 
@@ -100,6 +109,11 @@ function isAdBlockingPrompt(prompt = '') {
 
 function isYoutubeAdBlockingPrompt(prompt = '') {
   return isAdBlockingPrompt(prompt) && /\b(youtube|yt|shorts|video|videos)\b/i.test(prompt);
+}
+
+function isImageReplacementPrompt(prompt = '') {
+  return /\b(image|images|img|imgs|photo|photos|picture|pictures)\b/i.test(prompt)
+    && /\b(replace|replaces|replacing|block|blocks|blocking|hide|hides|hiding|remove|removes|removing)\b/i.test(prompt);
 }
 
 function buildRepairPrompt(originalPrompt, error) {
@@ -224,6 +238,13 @@ export async function editExtension(req, res, next) {
     });
     await extension.save();
     await recordSuccessfulGeneration(req);
+    await recordActivity({
+      user: req.user._id,
+      type: 'extension.edited',
+      title: extension.name,
+      description: 'Applied an edit request and created a new version',
+      metadata: { extensionId: extension._id, version, prompt: req.body.editPrompt },
+    });
 
     res.json(extension);
   } catch (error) {
@@ -239,6 +260,13 @@ export async function deleteExtension(req, res, next) {
       { new: true },
     );
     if (!deleted) return res.status(404).json({ message: 'Extension not found' });
+    await recordActivity({
+      user: req.user._id,
+      type: 'extension.deleted',
+      title: deleted.name,
+      description: 'Deleted an extension project',
+      metadata: { extensionId: deleted._id },
+    });
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -271,6 +299,13 @@ export async function duplicateExtension(req, res, next) {
     extension.versionHistory[0].zipUrl = zip.zipUrl;
     await extension.save();
     await recordSuccessfulGeneration(req);
+    await recordActivity({
+      user: req.user._id,
+      type: 'extension.duplicated',
+      title: extension.name,
+      description: `Duplicated from ${source.name}`,
+      metadata: { extensionId: extension._id, sourceExtensionId: source._id },
+    });
 
     res.status(201).json(extension);
   } catch (error) {
@@ -282,7 +317,15 @@ export async function scanExtension(req, res, next) {
   try {
     const extension = await Extension.findOne({ _id: req.params.id, owner: req.user._id, deletedAt: null });
     if (!extension) return res.status(404).json({ message: 'Extension not found' });
-    res.json(scanGeneratedFiles(extension.files));
+    const scan = scanGeneratedFiles(extension.files);
+    await recordActivity({
+      user: req.user._id,
+      type: 'extension.scanned',
+      title: extension.name,
+      description: 'Ran a generated-code security scan',
+      metadata: { extensionId: extension._id, score: scan.score, findings: scan.findings.length },
+    });
+    res.json(scan);
   } catch (error) {
     next(error);
   }

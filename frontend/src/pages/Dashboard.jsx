@@ -83,22 +83,32 @@ export default function Dashboard() {
   const [progressStep, setProgressStep] = useState(0);
   const [payments, setPayments] = useState([]);
   const [paymentConfig, setPaymentConfig] = useState(null);
+  const [activityItems, setActivityItems] = useState([]);
+  const [dailyUsage, setDailyUsage] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem('extensio-theme') || 'dark');
 
   const selected = useMemo(() => extensions.find(item => item._id === selectedId) || extensions[0], [extensions, selectedId]);
   const storageKb = Math.max(1, Math.round(JSON.stringify(extensions).length / 1024));
   const notifications = useMemo(() => {
     const extensionItems = extensions.slice(0, 2).map(item => ({
+      id: `extension:${item._id}`,
       title: item.name,
       description: 'Extension generated and ready to manage',
       page: 'My Extensions',
+      createdAt: item.updatedAt || item.createdAt,
+      type: 'extension',
     }));
     const paymentItems = payments.slice(0, 2).map(item => ({
+      id: `payment:${item._id}`,
       title: `${item.plan} ${item.status}`,
       description: `Payment ${item.status} for ${item.billingCycle} billing`,
       page: 'Billing',
+      createdAt: item.paidAt || item.updatedAt || item.createdAt,
+      type: 'payment',
     }));
-    return [...paymentItems, ...extensionItems].slice(0, 4);
+    return [...paymentItems, ...extensionItems]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 4);
   }, [extensions, payments]);
 
   const loadExtensions = useCallback(async (q = '') => {
@@ -118,12 +128,19 @@ export default function Dashboard() {
     setPaymentConfig(data);
   }, [token]);
 
+  const loadActivity = useCallback(async () => {
+    const data = await apiRequest('/api/activity/me', { token });
+    setActivityItems(data.items || []);
+    setDailyUsage(data.dailyUsage || null);
+  }, [token]);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadExtensions();
     loadPayments().catch(() => {});
     loadPaymentConfig().catch(() => {});
-  }, [loadExtensions, loadPaymentConfig, loadPayments]);
+    loadActivity().catch(() => {});
+  }, [loadActivity, loadExtensions, loadPaymentConfig, loadPayments]);
 
   useEffect(() => {
     const handler = event => {
@@ -164,6 +181,7 @@ export default function Dashboard() {
         body: JSON.stringify({ prompt }),
       });
       await loadExtensions();
+      await loadActivity().catch(() => {});
       setSelectedId(extension._id);
       setActivePage('History');
       toast.success('Extension ZIP is ready', { id: toastId });
@@ -187,6 +205,7 @@ export default function Dashboard() {
         body: JSON.stringify({ editPrompt }),
       });
       await loadExtensions();
+      await loadActivity().catch(() => {});
       setSelectedId(extension._id);
       setEditPrompt('');
       toast.success('New version created', { id: toastId });
@@ -200,6 +219,7 @@ export default function Dashboard() {
   async function removeExtension(id) {
     await apiRequest(`/api/extensions/${id}`, { token, method: 'DELETE' });
     await loadExtensions();
+    await loadActivity().catch(() => {});
     if (selectedId === id) setSelectedId('');
     toast.success('Extension deleted');
   }
@@ -209,6 +229,7 @@ export default function Dashboard() {
     try {
       const extension = await apiRequest(`/api/extensions/${id}/duplicate`, { token, method: 'POST' });
       await loadExtensions();
+      await loadActivity().catch(() => {});
       setSelectedId(extension._id);
       setActivePage('My Extensions');
       toast.success('Extension duplicated', { id: toastId });
@@ -225,6 +246,7 @@ export default function Dashboard() {
         body: JSON.stringify({ plan }),
       });
       setSubscription(data.subscription);
+      await loadActivity().catch(() => {});
       toast.success('Switched to Free plan');
       return;
     }
@@ -268,6 +290,7 @@ export default function Dashboard() {
 
     setSubscription(verified.subscription);
     await loadPayments();
+    await loadActivity().catch(() => {});
     toast.success(`Payment verified: ${verified.receipt.reference}`);
   }
 
@@ -351,6 +374,8 @@ export default function Dashboard() {
                   subscription={subscription}
                   choosePlan={choosePlan}
                   payments={payments}
+                  activityItems={activityItems}
+                  dailyUsage={dailyUsage}
                   paymentConfig={paymentConfig}
                   storageKb={storageKb}
                   setActivePage={setActivePage}
@@ -387,6 +412,8 @@ function DashboardPage({
   subscription,
   choosePlan,
   payments,
+  activityItems,
+  dailyUsage,
   paymentConfig,
   storageKb,
   setActivePage,
@@ -441,10 +468,10 @@ function DashboardPage({
     return (
       <PageShell eyebrow="Analytics" title="Usage, downloads, and activity" subtitle="Track extension generation volume, downloads, and recent workspace events.">
         <div className="space-y-6">
-          <AnalyticsSummary extensions={extensions} payments={payments} storageKb={storageKb} subscription={subscription} />
+          <AnalyticsSummary extensions={extensions} payments={payments} storageKb={storageKb} subscription={subscription} dailyUsage={dailyUsage} />
           <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
             <AnalyticsPanel extensions={extensions} payments={payments} />
-            <ActivityFeed extensions={extensions} payments={payments} />
+            <ActivityFeed extensions={extensions} payments={payments} activityItems={activityItems} />
           </div>
         </div>
       </PageShell>
@@ -473,15 +500,16 @@ function DashboardPage({
   return (
     <div className="space-y-6">
       <HeroDashboard />
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Generated Extensions" value={extensions.length} icon={Boxes} />
+        <StatCard label="Extensions Today" value={formatDailyUsage(dailyUsage)} icon={Activity} />
         <StatCard label="Downloads" value={extensions.length * 3} icon={Download} />
         <StatCard label="Storage Used" value={`${storageKb} KB`} icon={FileArchive} />
         <StatCard label="Current Plan" value={(subscription?.plan || 'free').toUpperCase()} icon={Zap} />
       </section>
       <div className="grid gap-6 xl:grid-cols-[1fr_0.8fr]">
         <QuickActionCard setActivePage={setActivePage} />
-        <ActivityFeed extensions={extensions} payments={payments} />
+        <ActivityFeed extensions={extensions} payments={payments} activityItems={activityItems} />
       </div>
     </div>
   );
@@ -867,15 +895,43 @@ function PaymentSetupNotice({ message }) {
 
 function TopNav({ user, subscription, notifications = [], search, setSearch, onSearch, onCommand, onNavigate, onLogout, theme, setTheme }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notificationsSeen, setNotificationsSeen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`extensio-read-notifications:${user?._id || user?.email || 'guest'}`) || '[]');
+    } catch {
+      return [];
+    }
+  });
   const [profileOpen, setProfileOpen] = useState(false);
+  const notificationsRef = useRef(null);
   const isLight = theme === 'light';
-  const notificationSignature = useMemo(() => notifications.map(item => `${item.title}:${item.description}`).join('|'), [notifications]);
-  const unreadCount = notificationsSeen ? 0 : notifications.length;
+  const notificationStorageKey = `extensio-read-notifications:${user?._id || user?.email || 'guest'}`;
+  const readSet = useMemo(() => new Set(readNotificationIds), [readNotificationIds]);
+  const unreadCount = notifications.filter(item => !readSet.has(item.id)).length;
 
   useEffect(() => {
-    setNotificationsSeen(false);
-  }, [notificationSignature]);
+    try {
+      const saved = JSON.parse(localStorage.getItem(notificationStorageKey) || '[]');
+      setReadNotificationIds(Array.isArray(saved) ? saved : []);
+    } catch {
+      setReadNotificationIds([]);
+    }
+  }, [notificationStorageKey]);
+
+  useEffect(() => {
+    localStorage.setItem(notificationStorageKey, JSON.stringify(readNotificationIds));
+  }, [notificationStorageKey, readNotificationIds]);
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!notificationsRef.current?.contains(event.target)) {
+        setNotificationsOpen(false);
+      }
+    }
+
+    if (notificationsOpen) document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [notificationsOpen]);
 
   function goTo(page) {
     onNavigate?.(page);
@@ -886,7 +942,15 @@ function TopNav({ user, subscription, notifications = [], search, setSearch, onS
   function toggleNotifications() {
     setNotificationsOpen(value => !value);
     setProfileOpen(false);
-    setNotificationsSeen(true);
+  }
+
+  function markAllNotificationsRead() {
+    setReadNotificationIds(current => Array.from(new Set([...current, ...notifications.map(item => item.id)])));
+  }
+
+  function openNotification(item) {
+    setReadNotificationIds(current => Array.from(new Set([...current, item.id])));
+    goTo(item.page);
   }
 
   return (
@@ -899,7 +963,7 @@ function TopNav({ user, subscription, notifications = [], search, setSearch, onS
           <Search size={16} className="text-[#9CA3AF]" />
           <input value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => event.key === 'Enter' && onSearch()} placeholder="Search extensions, prompts, files..." className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#6B7280]" />
         </div>
-        <div className="relative">
+        <div className="relative" ref={notificationsRef}>
           <button
             type="button"
             onClick={toggleNotifications}
@@ -915,17 +979,23 @@ function TopNav({ user, subscription, notifications = [], search, setSearch, onS
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-black">Notifications</p>
                   <div className="flex items-center gap-3">
-                    {notifications.length > 0 && <button type="button" onClick={() => setNotificationsSeen(true)} className="text-xs font-bold text-[#00E599]">Mark read</button>}
+                    {unreadCount > 0 && <button type="button" onClick={markAllNotificationsRead} className="text-xs font-bold text-[#00E599]">Mark read</button>}
                     <button type="button" onClick={() => setNotificationsOpen(false)} className="text-xs font-bold text-[#9CA3AF] hover:text-[#00E599]">Close</button>
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
-                  {notifications.length ? notifications.map((item, index) => (
-                    <button key={`${item.title}-${index}`} type="button" onClick={() => goTo(item.page)} className="w-full rounded-xl border border-[#1F2937] bg-[#030712] px-3 py-2 text-left transition hover:border-[#00E599]/50">
-                      <p className="text-sm font-black">{item.title}</p>
+                  {notifications.length ? notifications.map(item => {
+                    const unread = !readSet.has(item.id);
+                    return (
+                    <button key={item.id} type="button" onClick={() => openNotification(item)} className={clsx('w-full rounded-xl border px-3 py-2 text-left transition hover:border-[#00E599]/50', unread ? 'border-[#00E599]/40 bg-[#00E599]/10' : 'border-[#1F2937] bg-[#030712]')}>
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="min-w-0 text-sm font-black capitalize">{item.title}</p>
+                        {unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#00E599]" aria-label="Unread notification" />}
+                      </div>
                       <p className="mt-1 text-xs leading-5 text-[#9CA3AF]">{item.description}</p>
+                      {item.createdAt && <p className="mt-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#6B7280]">{new Date(item.createdAt).toLocaleString()}</p>}
                     </button>
-                  )) : (
+                  );}) : (
                     <p className="rounded-xl border border-dashed border-[#1F2937] px-3 py-4 text-center text-xs leading-5 text-[#9CA3AF]">No notifications yet. New generations and payment updates will appear here.</p>
                   )}
                 </div>
@@ -1129,6 +1199,12 @@ function getWeekKey(date) {
   return new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date);
 }
 
+function formatDailyUsage(dailyUsage) {
+  if (!dailyUsage) return '0/5';
+  if (dailyUsage.limit === null || dailyUsage.limit === undefined) return `${dailyUsage.used || 0}`;
+  return `${dailyUsage.used || 0}/${dailyUsage.limit}`;
+}
+
 function buildAnalyticsData(extensions, payments) {
   const today = new Date();
   const days = Array.from({ length: 7 }, (_, index) => {
@@ -1162,11 +1238,12 @@ function buildAnalyticsData(extensions, payments) {
   return days.map(({ date, ...item }) => item);
 }
 
-function AnalyticsSummary({ extensions, payments, storageKb, subscription }) {
+function AnalyticsSummary({ extensions, payments, storageKb, subscription, dailyUsage }) {
   const paidPayments = payments.filter(payment => payment.status === 'paid');
   const totalVersions = extensions.reduce((sum, item) => sum + Math.max(1, item.versionHistory?.length || 1), 0);
   const stats = [
     ['Extensions', extensions.length, Boxes],
+    ['Used Today', formatDailyUsage(dailyUsage), Activity],
     ['Version Events', totalVersions, Activity],
     ['Paid Receipts', paidPayments.length, Receipt],
     ['Storage Used', `${storageKb} KB`, FileArchive],
@@ -1174,7 +1251,7 @@ function AnalyticsSummary({ extensions, payments, storageKb, subscription }) {
   ];
 
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
       {stats.map(([label, value, Icon]) => (
         <motion.div key={label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel rounded-2xl p-4">
           <div className="flex items-center justify-between gap-3">
@@ -1232,7 +1309,14 @@ function AnalyticsPanel({ extensions, payments }) {
   );
 }
 
-function ActivityFeed({ extensions, payments = [] }) {
+function ActivityFeed({ extensions, payments = [], activityItems = [] }) {
+  const recordedEvents = activityItems.map(item => ({
+    id: item._id,
+    title: item.title,
+    description: item.description,
+    createdAt: item.createdAt,
+    icon: activityIconForType(item.type),
+  }));
   const extensionEvents = extensions.flatMap(item => {
     const events = [{
       id: `${item._id}-created`,
@@ -1259,9 +1343,10 @@ function ActivityFeed({ extensions, payments = [] }) {
     createdAt: payment.createdAt,
     icon: Receipt,
   }));
-  const events = [...paymentEvents, ...extensionEvents]
+  const fallbackEvents = [...paymentEvents, ...extensionEvents]
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
     .slice(0, 8);
+  const events = recordedEvents.length ? recordedEvents : fallbackEvents;
 
   return (
     <section className="glass-panel rounded-2xl p-5">
@@ -1282,6 +1367,16 @@ function ActivityFeed({ extensions, payments = [] }) {
       </div>
     </section>
   );
+}
+
+function activityIconForType(type) {
+  if (type?.startsWith('subscription.')) return Receipt;
+  if (type === 'extension.scanned') return ShieldCheck;
+  if (type === 'extension.deleted') return Trash2;
+  if (type === 'extension.edited') return History;
+  if (type === 'extension.duplicated') return Copy;
+  if (type === 'extension.generated') return Boxes;
+  return Activity;
 }
 
 function SettingsControls({ paymentConfig, theme, setTheme, setActivePage }) {

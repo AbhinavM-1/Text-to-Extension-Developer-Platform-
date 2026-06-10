@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.routes.js';
 import extensionRoutes from './routes/extension.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
+import activityRoutes from './routes/activity.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware.js';
 import { validateRuntimeEnv } from './config/env.js';
 import { logger } from './services/logger.service.js';
@@ -76,6 +77,7 @@ export function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/extensions', extensionRoutes);
   app.use('/api/subscriptions', subscriptionRoutes);
+  app.use('/api/activity', activityRoutes);
   app.use('/api/admin', adminRoutes);
 
   app.use(notFoundHandler);

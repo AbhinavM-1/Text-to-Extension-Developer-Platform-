@@ -9,6 +9,7 @@ import {
   verifyRazorpaySignature,
   verifyRazorpayWebhookSignature,
 } from '../services/payment.service.js';
+import { recordActivity } from '../services/activity.service.js';
 
 const PLAN_PRICES = {
   free: { monthly: 0, yearly: 0 },
@@ -134,6 +135,13 @@ export async function checkoutSubscription(req, res, next) {
         plan: 'free',
       },
     });
+    await recordActivity({
+      user: req.user._id,
+      type: 'subscription.checkout',
+      title: 'Free plan activated',
+      description: 'Switched subscription to Free plan',
+      metadata: { plan: 'free' },
+    });
   } catch (error) {
     next(error);
   }
@@ -169,6 +177,13 @@ export async function createPaymentOrder(req, res, next) {
       receipt: order.receipt,
       razorpayOrderId: order.id,
       rawOrder: order,
+    });
+    await recordActivity({
+      user: req.user._id,
+      type: 'subscription.payment_created',
+      title: `${plan} payment created`,
+      description: `Created ${billingCycle} billing payment order`,
+      metadata: { paymentId: payment._id, plan, billingCycle, paymentMethod, amount },
     });
 
     res.status(201).json({
@@ -277,6 +292,18 @@ export async function verifyPayment(req, res, next) {
       paymentRecord,
       razorpayPayment,
       razorpaySignature,
+    });
+    await recordActivity({
+      user: req.user._id,
+      type: 'subscription.payment_verified',
+      title: `${paymentRecord.plan} payment verified`,
+      description: `Verified ${paymentRecord.billingCycle} billing payment`,
+      metadata: {
+        paymentId: paymentRecord._id,
+        plan: paymentRecord.plan,
+        billingCycle: paymentRecord.billingCycle,
+        amount: paymentRecord.amount,
+      },
     });
 
     res.json({

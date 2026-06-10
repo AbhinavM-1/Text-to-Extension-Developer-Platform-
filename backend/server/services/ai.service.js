@@ -126,6 +126,95 @@ function imageSquarePayload(userPrompt = '') {
   const shape = extractRequestedShape(userPrompt);
   const titleColor = color.label.charAt(0).toUpperCase() + color.label.slice(1);
   const titleShape = shape.label.charAt(0).toUpperCase() + shape.label.slice(1);
+  const contentJs = `(() => {
+  'use strict';
+
+  const REPLACED_ATTR = 'data-extensio-image-replaced';
+  const BACKGROUND_ATTR = 'data-extensio-background-replaced';
+  const BOX_CLASS = 'extensio-image-replacement extensio-shape-${shape.label}';
+  const FORCE_EQUAL_SIZE = ${shape.forceSquare};
+  let scheduled = false;
+
+  function getVisibleSize(element) {
+    const rect = element.getBoundingClientRect?.();
+    let width = Math.round(rect?.width || element.width || element.naturalWidth || element.clientWidth || 120);
+    let height = Math.round(rect?.height || element.height || element.naturalHeight || element.clientHeight || 90);
+    width = Math.max(24, width);
+    height = Math.max(24, height);
+    if (FORCE_EQUAL_SIZE) {
+      const side = Math.max(width, height);
+      width = side;
+      height = side;
+    }
+    return { width, height };
+  }
+
+  function createReplacement(element) {
+    const { width, height } = getVisibleSize(element);
+    const box = document.createElement('div');
+    box.className = BOX_CLASS;
+    box.style.width = width + 'px';
+    box.style.height = height + 'px';
+    box.setAttribute('role', 'img');
+    box.setAttribute('aria-label', 'Image replaced by Extensio.ai');
+    return box;
+  }
+
+  function replaceImageElement(element) {
+    if (!element || element.nodeType !== 1 || element.getAttribute(REPLACED_ATTR) === 'true') return;
+    if (!element.isConnected || !element.parentNode) return;
+    element.setAttribute(REPLACED_ATTR, 'true');
+    element.replaceWith(createReplacement(element));
+  }
+
+  function replaceBackgroundImage(element) {
+    if (!element || element.nodeType !== 1 || element.getAttribute(BACKGROUND_ATTR) === 'true') return;
+    const style = window.getComputedStyle(element);
+    if (!style || !style.backgroundImage || style.backgroundImage === 'none') return;
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 24 || rect.height < 24) return;
+    element.setAttribute(BACKGROUND_ATTR, 'true');
+    element.classList.add('extensio-background-replacement', 'extensio-shape-${shape.label}');
+    element.style.backgroundImage = 'none';
+  }
+
+  function scan(root = document) {
+    if (!root || !document.documentElement) return;
+    if (root.nodeType === 1) {
+      const tag = root.tagName;
+      if (tag === 'IMG' || tag === 'IMAGE') replaceImageElement(root);
+      replaceBackgroundImage(root);
+    }
+
+    const scope = root.querySelectorAll ? root : document;
+    scope.querySelectorAll('img, picture img, svg image, [style*="background-image"], [data-bg], [data-background-image]').forEach((element) => {
+      if (element.tagName === 'IMG' || element.tagName === 'IMAGE') replaceImageElement(element);
+      else replaceBackgroundImage(element);
+    });
+  }
+
+  function scheduleScan(root) {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      scan(root || document);
+    });
+  }
+
+  scan();
+  window.addEventListener('load', () => scheduleScan(), { once: true });
+  window.setInterval(() => scheduleScan(), 1500);
+
+  new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === 1) scheduleScan(node);
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+})();`;
+  const stylesCss = `.extensio-image-replacement{display:inline-block!important;background:${color.hex}!important;border:2px solid ${color.border}!important;box-sizing:border-box!important;vertical-align:middle!important;min-width:24px!important;min-height:24px!important}.extensio-background-replacement{background:${color.hex}!important;border:2px solid ${color.border}!important;box-sizing:border-box!important}.extensio-shape-circle{border-radius:9999px!important}.extensio-shape-rounded-box,.extensio-shape-rounded-rectangle{border-radius:12px!important}`;
 
   return {
     name: `${titleColor} ${titleShape} Image Replacer`,
@@ -139,7 +228,7 @@ function imageSquarePayload(userPrompt = '') {
           version: '1.0.0',
           description: `Replaces page images with ${color.label} ${shape.plural}.`,
           action: { default_popup: 'popup.html' },
-          content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['styles.css'], run_at: 'document_idle' }],
+          content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['styles.css'], run_at: 'document_start', all_frames: true }],
         }, null, 2),
       },
       {
@@ -148,11 +237,11 @@ function imageSquarePayload(userPrompt = '') {
       },
       {
         filename: 'content.js',
-        content: `function replaceImages(){document.querySelectorAll('img').forEach((img)=>{const box=document.createElement('div');box.className='extensio-image-replacement extensio-shape-${shape.label}';const width=img.width||160;const height=img.height||120;box.style.width=${shape.forceSquare ? 'Math.max(width,height)' : 'width'}+'px';box.style.height=${shape.forceSquare ? 'Math.max(width,height)' : 'height'}+'px';img.replaceWith(box);});}replaceImages();new MutationObserver(replaceImages).observe(document.documentElement,{childList:true,subtree:true});`,
+        content: contentJs,
       },
       {
         filename: 'styles.css',
-        content: `.extensio-image-replacement{display:inline-block;background:${color.hex};border:2px solid ${color.border};box-sizing:border-box}.extensio-shape-circle{border-radius:9999px}.extensio-shape-rounded-box,.extensio-shape-rounded-rectangle{border-radius:12px}`,
+        content: stylesCss,
       },
       {
         filename: 'popup.html',

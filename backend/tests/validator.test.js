@@ -42,6 +42,37 @@ test('validates complete Manifest V3 extension files', () => {
   assert.equal(manifest.action.default_popup, 'popup.html');
 });
 
+test('normalizes string manifest arrays before packaging', () => {
+  const payload = basePayload();
+  const manifest = JSON.parse(payload.files[0].content);
+  manifest.permissions = 'storage';
+  manifest.host_permissions = '<all_urls>';
+  manifest.content_scripts[0].matches = '<all_urls>';
+  manifest.content_scripts[0].js = 'content.js';
+  manifest.content_scripts[0].css = 'styles.css';
+  payload.files[0].content = JSON.stringify(manifest);
+
+  const files = normalizeFiles(payload);
+  const normalizedManifest = validateExtensionFiles(files);
+  assert.deepEqual(normalizedManifest.permissions, ['storage']);
+  assert.deepEqual(normalizedManifest.host_permissions, ['<all_urls>']);
+  assert.deepEqual(normalizedManifest.content_scripts[0].matches, ['<all_urls>']);
+  assert.deepEqual(normalizedManifest.content_scripts[0].js, ['content.js']);
+  assert.deepEqual(normalizedManifest.content_scripts[0].css, ['styles.css']);
+});
+
+test('rejects non-array content script match values after normalization cannot repair them', () => {
+  const payload = basePayload();
+  const manifest = JSON.parse(payload.files[0].content);
+  manifest.content_scripts[0].matches = { pattern: '<all_urls>' };
+  payload.files[0].content = JSON.stringify(manifest);
+
+  assert.throws(
+    () => validateExtensionFiles(normalizeFiles(payload)),
+    /content_scripts\[0\]\.matches must be an array of strings/,
+  );
+});
+
 test('rejects missing required extension files', () => {
   const payload = basePayload();
   payload.files = payload.files.filter(file => file.filename !== 'content.js');
