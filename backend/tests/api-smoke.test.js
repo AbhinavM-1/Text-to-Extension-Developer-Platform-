@@ -45,7 +45,7 @@ test('unknown routes return consistent JSON errors', async () => {
     assert.match(body.message, /Route not found/);
   } finally {
     server.close();
-    if (previousSecret === undefined) delete process.env.JWT_SECRET;
+    if (previousSecret === undefined) delete process.env.JMT_SECRET;
     else process.env.JWT_SECRET = previousSecret;
   }
 });
