@@ -113,26 +113,35 @@ export function localTemplatePayload(userPrompt = '') {
   if (prompt.includes('dark mode') || prompt.includes('darkmode')) return darkModePayload();
   if (prompt.includes('highlight') && prompt.includes('link')) return linkHighlighterPayload(userPrompt);
   if (prompt.includes('read') && prompt.includes('time')) return readingTimePayload();
+  if (prompt.includes('image') || prompt.includes('images') || prompt.includes('img') || prompt.includes('photo') || prompt.includes('picture')) {
+    return imageSquarePayload(userPrompt);
+  }
   if (/\b(block\w*|remove\w*|hid\w*|clean\w*|stop\w*)\b/i.test(prompt)
     && /\b(ad|ads|advertisement|advertisements|sponsor|sponsored|promoted|popup|pop-up)\b/i.test(prompt)) {
     return adBlockerPayload();
   }
-  if (prompt.includes('image') || prompt.includes('img') || prompt.includes('photo')) return imageSquarePayload(userPrompt);
   return genericHelperPayload(userPrompt);
 }
 
 function imageSquarePayload(userPrompt = '') {
   const color = extractRequestedColor(userPrompt);
   const shape = extractRequestedShape(userPrompt);
+  const includeAds = /\b(ad|ads|advertisement|advertisements|sponsor|sponsored|promoted|popup|pop-up)\b/i.test(userPrompt);
   const titleColor = color.label.charAt(0).toUpperCase() + color.label.slice(1);
   const titleShape = shape.label.charAt(0).toUpperCase() + shape.label.slice(1);
+  const targetLabel = includeAds ? 'Image And Ad' : 'Image';
+  const targetDescription = includeAds
+    ? `Replaces page images and likely ad containers with ${color.label} ${shape.plural}.`
+    : `Replaces page images with ${color.label} ${shape.plural}.`;
   const contentJs = `(() => {
   'use strict';
 
   const REPLACED_ATTR = 'data-extensio-image-replaced';
   const BACKGROUND_ATTR = 'data-extensio-background-replaced';
+  const AD_REPLACED_ATTR = 'data-extensio-ad-replaced';
   const BOX_CLASS = 'extensio-image-replacement extensio-shape-${shape.label}';
   const FORCE_EQUAL_SIZE = ${shape.forceSquare};
+  const INCLUDE_ADS = ${includeAds};
   let scheduled = false;
 
   function getVisibleSize(element) {
@@ -178,18 +187,51 @@ function imageSquarePayload(userPrompt = '') {
     element.style.backgroundImage = 'none';
   }
 
+  function hasSponsoredText(element) {
+    const text = (element.innerText || element.textContent || '').slice(0, 300).toLowerCase();
+    return /\\b(ad|ads|advertisement|sponsored|promoted|sponsor|shop now|learn more)\\b/.test(text);
+  }
+
+  function isLikelyAdElement(element) {
+    if (!INCLUDE_ADS || !element || element.nodeType !== 1 || element.getAttribute(AD_REPLACED_ATTR) === 'true') return false;
+    const marker = [
+      element.id,
+      element.className,
+      element.getAttribute('aria-label'),
+      element.getAttribute('data-testid'),
+      element.getAttribute('data-ad-slot'),
+      element.getAttribute('data-ad-client'),
+      element.getAttribute('src'),
+      element.getAttribute('data-src'),
+    ].filter(Boolean).join(' ').toLowerCase();
+    const markerLooksAd = /\\b(ad|ads|advert|advertisement|sponsored|sponsor|promoted|promo|doubleclick|googlesyndication|googleadservices)\\b/.test(marker);
+    if (!markerLooksAd && !hasSponsoredText(element)) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width >= 80 && rect.height >= 40 && !element.closest('[data-extensio-ad-replaced="true"]');
+  }
+
+  function replaceAdElement(element) {
+    if (!isLikelyAdElement(element) || !element.parentNode) return;
+    element.setAttribute(AD_REPLACED_ATTR, 'true');
+    element.replaceWith(createReplacement(element));
+  }
+
   function scan(root = document) {
     if (!root || !document.documentElement) return;
     if (root.nodeType === 1) {
       const tag = root.tagName;
       if (tag === 'IMG' || tag === 'IMAGE') replaceImageElement(root);
       replaceBackgroundImage(root);
+      replaceAdElement(root);
     }
 
     const scope = root.querySelectorAll ? root : document;
-    scope.querySelectorAll('img, picture img, svg image, [style*="background-image"], [data-bg], [data-background-image]').forEach((element) => {
+    scope.querySelectorAll('img, picture img, svg image, iframe, aside, [role="complementary"], [style*="background-image"], [data-bg], [data-background-image], [id*="ad"], [class*="ad"], [aria-label*="ad"], [data-ad-slot], [data-ad-client]').forEach((element) => {
       if (element.tagName === 'IMG' || element.tagName === 'IMAGE') replaceImageElement(element);
-      else replaceBackgroundImage(element);
+      else {
+        replaceBackgroundImage(element);
+        replaceAdElement(element);
+      }
     });
   }
 
@@ -217,16 +259,16 @@ function imageSquarePayload(userPrompt = '') {
   const stylesCss = `.extensio-image-replacement{display:inline-block!important;background:${color.hex}!important;border:2px solid ${color.border}!important;box-sizing:border-box!important;vertical-align:middle!important;min-width:24px!important;min-height:24px!important}.extensio-background-replacement{background:${color.hex}!important;border:2px solid ${color.border}!important;box-sizing:border-box!important}.extensio-shape-circle{border-radius:9999px!important}.extensio-shape-rounded-box,.extensio-shape-rounded-rectangle{border-radius:12px!important}`;
 
   return {
-    name: `${titleColor} ${titleShape} Image Replacer`,
-    description: `Replaces page images with ${color.label} ${shape.plural}.`,
+    name: `${titleColor} ${titleShape} ${targetLabel} Replacer`,
+    description: targetDescription,
     files: [
       {
         filename: 'manifest.json',
         content: JSON.stringify({
           manifest_version: 3,
-          name: `${titleColor} ${titleShape} Image Replacer`,
+          name: `${titleColor} ${titleShape} ${targetLabel} Replacer`,
           version: '1.0.0',
-          description: `Replaces page images with ${color.label} ${shape.plural}.`,
+          description: targetDescription,
           action: { default_popup: 'popup.html' },
           content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], css: ['styles.css'], run_at: 'document_start', all_frames: true }],
         }, null, 2),
@@ -245,7 +287,7 @@ function imageSquarePayload(userPrompt = '') {
       },
       {
         filename: 'popup.html',
-        content: `<!doctype html><html><head><meta charset="utf-8"><title>${titleColor} ${titleShape} Image Replacer</title><style>body{width:220px;font-family:Arial,sans-serif;margin:16px;color:#111827}h1{font-size:16px;margin:0 0 8px}</style></head><body><h1>${titleColor} ${titleShape} Image Replacer</h1><p>Images are replaced with ${color.label} ${shape.plural} automatically.</p><script src="popup.js"></script></body></html>`,
+        content: `<!doctype html><html><head><meta charset="utf-8"><title>${titleColor} ${titleShape} ${targetLabel} Replacer</title><style>body{width:220px;font-family:Arial,sans-serif;margin:16px;color:#111827}h1{font-size:16px;margin:0 0 8px}</style></head><body><h1>${titleColor} ${titleShape} ${targetLabel} Replacer</h1><p>${includeAds ? 'Images and likely ad containers are' : 'Images are'} replaced with ${color.label} ${shape.plural} automatically.</p><script src="popup.js"></script></body></html>`,
       },
       {
         filename: 'popup.js',
