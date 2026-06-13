@@ -3,19 +3,22 @@ import { Copy, Download, Expand, FileCode2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
-export default function FileViewer({ extension }) {
+export default function FileViewer({ extension }) 
+{
   const files = useMemo(() => extension?.files || [], [extension?.files]);
   const [activeName, setActiveName] = useState('');
   const [fullscreen, setFullscreen] = useState(false);
   const active = useMemo(() => files.find(file => file.filename === activeName) || files[0], [files, activeName]);
 
-  function copyActive() {
+  function copyActive() 
+  {
     if (!active) return;
     navigator.clipboard.writeText(active.content);
     toast.success(`${active.filename} copied`);
   }
 
-  function downloadActive() {
+  function downloadActive()
+  {
     if (!active) return;
     const blob = new Blob([active.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
