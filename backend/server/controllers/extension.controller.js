@@ -76,7 +76,7 @@ export async function generateExtension(req, res, next) {
 async function buildSafeGeneratedExtension(prompt) {
   let lastError;
 
-  if (isYoutubeAdBlockingPrompt(prompt) || isImageReplacementPrompt(prompt)) {
+  if (shouldUseLocalTemplate(prompt)) {
     return validateGeneratedPayload(localTemplatePayload(prompt), prompt);
   }
 
@@ -111,9 +111,30 @@ function isYoutubeAdBlockingPrompt(prompt = '') {
   return isAdBlockingPrompt(prompt) && /\b(youtube|yt|shorts|video|videos)\b/i.test(prompt);
 }
 
+function shouldUseLocalTemplate(prompt = '') {
+  return isYoutubeAdBlockingPrompt(prompt)
+    || isImageReplacementPrompt(prompt)
+    || isLinkHighlighterPrompt(prompt)
+    || isDarkModePrompt(prompt)
+    || isReadingTimePrompt(prompt);
+}
+
 function isImageReplacementPrompt(prompt = '') {
   return /\b(image|images|img|imgs|photo|photos|picture|pictures)\b/i.test(prompt)
     && /\b(replace|replaces|replacing|block|blocks|blocking|hide|hides|hiding|remove|removes|removing)\b/i.test(prompt);
+}
+
+function isLinkHighlighterPrompt(prompt = '') {
+  return /\b(highlight|mark|color|colour)\b/i.test(prompt)
+    && /\b(link|links|url|urls|anchor|anchors)\b/i.test(prompt);
+}
+
+function isDarkModePrompt(prompt = '') {
+  return /\b(dark\s*mode|darkmode|night\s*mode)\b/i.test(prompt);
+}
+
+function isReadingTimePrompt(prompt = '') {
+  return /\b(reading\s*time|read\s*time|estimate\s*reading)\b/i.test(prompt);
 }
 
 function buildRepairPrompt(originalPrompt, error) {

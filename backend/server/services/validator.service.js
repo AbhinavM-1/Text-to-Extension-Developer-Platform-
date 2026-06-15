@@ -13,6 +13,17 @@ export function normalizeFiles(aiPayload) {
     content: String(file.content ?? ''),
   }));
 
+  for (const file of files) {
+    if (file.content.trim()) continue;
+    if (file.filename === 'background.js') {
+      file.content = "chrome.runtime.onInstalled.addListener(() => console.log('Extensio extension installed'));";
+    } else if (file.filename === 'popup.js') {
+      file.content = "document.addEventListener('DOMContentLoaded', () => console.log('Extensio popup ready'));";
+    } else if (file.filename === 'styles.css' || file.filename === 'style.css') {
+      file.content = '/* No extension styles required. */';
+    }
+  }
+
   const legacyStyle = files.find(file => file.filename === 'style.css');
   const modernStyle = files.find(file => file.filename === 'styles.css');
   if (legacyStyle && !modernStyle) legacyStyle.filename = 'styles.css';

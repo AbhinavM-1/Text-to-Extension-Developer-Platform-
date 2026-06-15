@@ -61,6 +61,21 @@ test('normalizes string manifest arrays before packaging', () => {
   assert.deepEqual(normalizedManifest.content_scripts[0].css, ['styles.css']);
 });
 
+test('repairs empty safe stub files before validation', () => {
+  const payload = basePayload();
+  payload.files.find(file => file.filename === 'background.js').content = '';
+  payload.files.find(file => file.filename === 'popup.js').content = '';
+  payload.files.find(file => file.filename === 'styles.css').content = '';
+
+  const files = normalizeFiles(payload);
+  const manifest = validateExtensionFiles(files);
+
+  assert.equal(manifest.manifest_version, 3);
+  assert.match(files.find(file => file.filename === 'background.js').content, /onInstalled/);
+  assert.match(files.find(file => file.filename === 'popup.js').content, /DOMContentLoaded/);
+  assert.match(files.find(file => file.filename === 'styles.css').content, /No extension styles required/);
+});
+
 test('rejects non-array content script match values after normalization cannot repair them', () => {
   const payload = basePayload();
   const manifest = JSON.parse(payload.files[0].content);
