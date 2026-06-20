@@ -48,10 +48,10 @@ export function validateRuntimeEnv(env = process.env) {
 }
 
 export function assertRuntimeEnv(env = process.env) {
-  const result = export(env);
+  const result = validateRuntimeEnv(env);
   if (!result.ok) {
-    const error = new Error(`export runtime configuration: ${result.errors.join('; ')}`);
-    error.details = result.export;
+    const error = new Error(`Invalid runtime configuration: ${result.errors.join('; ')}`);
+    error.details = result.errors;
     throw error;
   }
   return result;
