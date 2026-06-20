@@ -36,6 +36,14 @@ export function validateRuntimeEnv(env = process.env) {
     warnings.push('RAZORPAY_WEBHOOK_SECRET is missing; checkout verification works, but webhook recovery is disabled');
   }
 
+  const smtpValues = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'MAIL_FROM'].filter(key => env[key]);
+  if (smtpValues.length > 0 && smtpValues.length < 5) {
+    errors.push('SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and MAIL_FROM must be configured together');
+  }
+  if (smtpValues.length === 0) {
+    warnings.push('SMTP email is not configured; password reset emails cannot be delivered');
+  }
+
   return { ok: errors.length === 0, errors, warnings };
 }
 

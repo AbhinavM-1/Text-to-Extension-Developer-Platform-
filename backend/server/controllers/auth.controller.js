@@ -26,9 +26,12 @@ export async function me(req, res) {
 export async function forgotPassword(req, res, next) {
   try {
     const result = await createPasswordReset(req.body.email);
+    const isProduction = process.env.NODE_ENV === 'production';
     res.json({
-      message: 'If that email exists, a reset link has been prepared.',
-      resetToken: process.env.NODE_ENV === 'production' ? undefined : result.resetToken,
+      message: result.emailSent
+        ? 'If that email exists, a reset link has been sent to the inbox.'
+        : 'If that email exists, a reset link has been created for this local demo.',
+      resetLink: !isProduction ? result.resetLink : undefined,
     });
   } catch (error) {
     next(error);

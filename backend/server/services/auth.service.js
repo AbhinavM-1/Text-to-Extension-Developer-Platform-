@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.js';
 import { Subscription } from '../models/Subscription.js';
+import { buildPasswordResetLink, isEmailConfigured, sendPasswordResetEmail } from './email.service.js';
 
 export function signToken(user) {
   return jwt.sign(
@@ -221,7 +222,28 @@ export async function createPasswordReset(email) {
   user.passwordResetExpires = new Date(Date.now() + 30 * 60 * 1000);
   await user.save();
 
-  return { ok: true, resetToken: token };
+  const resetLink = buildPasswordResetLink(token, user.email);
+  if (!isEmailConfigured()) {
+    if (process.env.NODE_ENV === 'production') {
+      const error = new Error('Password reset email is not configured. Please contact support.');
+      error.status = 503;
+      throw error;
+    }
+
+    return {
+      ok: true,
+      emailSent: false,
+      resetLink,
+    };
+  }
+
+  await sendPasswordResetEmail({
+    to: user.email,
+    name: user.name,
+    resetLink,
+  });
+
+  return { ok: true, emailSent: true };
 }
 
 export async function resetPassword({ token, password }) {
